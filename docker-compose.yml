@@ -3,7 +3,7 @@ services:
   backend:
     build:
       context: ./backend
-    container_name: voice-backend
+    container_name: aurora-backend
     ports:
       - "8000:8000"
     environment:
@@ -18,7 +18,7 @@ services:
   frontend:
     build:
       context: ./frontend
-    container_name: voice-frontend
+    container_name: aurora-frontend
     ports:
       - "5173:80"
     depends_on:
