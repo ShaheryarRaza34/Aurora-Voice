@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>MS1 — Live ASR + TTS</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 820px;
+        margin: 24px auto;
+        padding: 0 12px;
+      }
+      h1 {
+        font-size: 22px;
+      }
+      button {
+        padding: 10px 16px;
+        border-radius: 8px;
+        border: 1px solid #ccc;
+        cursor: pointer;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #bbb;
+        display: inline-block;
+      }
+      .live {
+        background: #0a0;
+      }
+      .partial {
+        opacity: 0.6;
+        min-height: 24px;
+        margin: 8px 0;
+      }
+      .final {
+        margin-top: 12px;
+      }
+      .line {
+        padding: 8px 10px;
+        background: #f7f7f8;
+        border: 1px solid #eee;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+      .text {
+        flex: 1;
+      }
+      .play {
+        min-width: 44px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🎙️ MS1 — Live Transcription (local) + TTS playback</h1>
+    <div class="row">
+      <button id="start">Start</button>
+      <button id="stop" disabled>Stop</button>
+      <span id="status" class="dot" title="mic status"></span>
+    </div>
+
+    <div>
+      <strong>Partial:</strong>
+      <div id="partial" class="partial"></div>
+    </div>
+    <div>
+      <strong>Final:</strong>
+      <div id="final" class="final"></div>
+    </div>
+
+    <script>
+      const SAMPLE_RATE = 16000;
+      let ws, audioCtx, node, source, stream;
+
+      function setLive(on) {
+        document.getElementById("status").classList.toggle("live", !!on);
+      }
+
+      function downsample(buffer, inRate, outRate) {
+        if (outRate === inRate) return buffer;
+        const ratio = inRate / outRate;
+        const newLen = Math.round(buffer.length / ratio);
+        const result = new Float32Array(newLen);
+        let o = 0,
+          i = 0;
+        while (o < result.length) {
+          const next = Math.round((o + 1) * ratio);
+          let sum = 0,
+            count = 0;
+          for (; i < next && i < buffer.length; i++) {
+            sum += buffer[i];
+            count++;
+          }
+          result[o++] = sum / count;
+        }
+        return result;
+      }
+
+      function floatTo16BitPCM(float32) {
+        const out = new Int16Array(float32.length);
+        for (let i = 0; i < float32.length; i++) {
+          let s = Math.max(-1, Math.min(1, float32[i]));
+          out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        return out.buffer;
+      }
+
+      async function start() {
+        ws = new WebSocket("ws://localhost:8000/ws/asr");
+        ws.onopen = () => setLive(true);
+        ws.onclose = () => setLive(false);
+        ws.onmessage = (ev) => {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === "partial") {
+            document.getElementById("partial").textContent = msg.text;
+          } else if (msg.type === "final") {
+            const wrap = document.createElement("div");
+            wrap.className = "line";
+
+            const text = document.createElement("div");
+            text.className = "text";
+            text.textContent = msg.text;
+
+            const btn = document.createElement("button");
+            btn.className = "play";
+            btn.textContent = "🔊";
+            btn.onclick = async () => {
+              const res = await fetch(
+                "http://localhost:8000/tts?text=" + encodeURIComponent(msg.text)
+              );
+              if (!res.ok) {
+                alert("TTS error");
+                return;
+              }
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const audio = new Audio(url);
+              audio.play();
+            };
+
+            wrap.appendChild(text);
+            wrap.appendChild(btn);
+            document.getElementById("final").appendChild(wrap);
+            document.getElementById("partial").textContent = "";
+          } else if (msg.type === "error") {
+            alert("ASR error: " + msg.message);
+          }
+        };
+
+        // mic
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: 48000,
+        });
+        source = audioCtx.createMediaStreamSource(stream);
+
+        node = audioCtx.createScriptProcessor(4096, 1, 1);
+        source.connect(node);
+        node.connect(audioCtx.destination);
+
+        node.onaudioprocess = (e) => {
+          if (!ws || ws.readyState !== 1) return;
+          const input = e.inputBuffer.getChannelData(0);
+          const down = downsample(input, audioCtx.sampleRate, SAMPLE_RATE);
+          const pcm16 = floatTo16BitPCM(down);
+          ws.send(pcm16);
+        };
+
+        document.getElementById("start").disabled = true;
+        document.getElementById("stop").disabled = false;
+      }
+
+      function stop() {
+        if (node) node.disconnect();
+        if (source) source.disconnect();
+        if (audioCtx) audioCtx.close();
+        if (stream) stream.getTracks().forEach((t) => t.stop());
+        if (ws && ws.readyState === 1) ws.close();
+
+        document.getElementById("start").disabled = false;
+        document.getElementById("stop").disabled = true;
+        setLive(false);
+      }
+
+      document.getElementById("start").onclick = start;
+      document.getElementById("stop").onclick = stop;
+    </script>
+  </body>
+</html>
