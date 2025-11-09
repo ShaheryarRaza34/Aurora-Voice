@@ -6,258 +6,55 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       :root {
-        --bg: #0f1115;
-        --panel: #171a20;
-        --panel-2: #1f2430;
-        --text: #e9eef5;
-        --muted: #a9b2c3;
-        --brand: #6ea8fe;
-        --accent: #8be9fd;
-        --ok: #2ecc71;
-        --warn: #ffd166;
-        --border: #2a2f3a;
-        --chip: #212634;
-        --shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+        --bg: #0f1115; --panel: #171a20; --panel-2: #1f2430; --text: #e9eef5; --muted: #a9b2c3;
+        --brand: #6ea8fe; --accent: #8be9fd; --ok: #2ecc71; --warn: #ffd166; --border: #2a2f3a;
+        --chip: #212634; --shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
       }
       @media (prefers-color-scheme: light) {
         :root {
-          --bg: #fbfbfd;
-          --panel: #ffffff;
-          --panel-2: #f4f6fb;
-          --text: #12161c;
-          --muted: #6b7280;
-          --brand: #3b82f6;
-          --accent: #0ea5e9;
-          --ok: #16a34a;
-          --warn: #f59e0b;
-          --border: #e5e7eb;
-          --chip: #eef2ff;
-          --shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+          --bg:#fbfbfd; --panel:#ffffff; --panel-2:#f4f6fb; --text:#12161c; --muted:#6b7280;
+          --brand:#3b82f6; --accent:#0ea5e9; --ok:#16a34a; --warn:#f59e0b; --border:#e5e7eb;
+          --chip:#eef2ff; --shadow:0 8px 20px rgba(0,0,0,.08);
         }
       }
-      * {
-        box-sizing: border-box;
-      }
-      body {
-        margin: 0;
-        background: var(--bg);
-        color: var(--text);
-        font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Arial,
-          sans-serif;
-      }
-      .container {
-        max-width: 980px;
-        margin: 28px auto;
-        padding: 0 16px;
-      }
-      .card {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 16px;
-        box-shadow: var(--shadow);
-      }
-      header.card {
-        padding: 16px 18px;
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        justify-content: space-between;
-      }
-      .title {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-        font-weight: 700;
-        letter-spacing: 0.2px;
-      }
-      .title .badge {
-        font-weight: 600;
-        font-size: 12px;
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: var(--chip);
-        color: var(--brand);
-        border: 1px solid var(--border);
-      }
-      .controls {
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-        align-items: center;
-      }
-      button,
-      .btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 10px 14px;
-        border-radius: 12px;
-        border: 1px solid var(--border);
-        background: var(--panel-2);
-        color: var(--text);
-        cursor: pointer;
-        transition: transform 0.02s ease;
-      }
-      button:active {
-        transform: translateY(1px);
-      }
-      button.primary {
-        background: var(--brand);
-        color: white;
-        border-color: transparent;
-      }
-      button.ghost {
-        background: transparent;
-      }
-      button:disabled {
-        opacity: 0.55;
-        cursor: not-allowed;
-      }
-      .dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: #888;
-      }
-      .dot.live {
-        background: var(--ok);
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent);
-      }
-      .dot.ws {
-        background: #cbd5e1;
-      }
-      .dot.ws.on {
-        background: var(--ok);
-      }
-      .row {
-        margin-top: 14px;
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 14px;
-      }
-
-      .meters {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-        color: var(--muted);
-      }
-      .meter {
-        height: 8px;
-        width: 160px;
-        background: var(--panel-2);
-        border-radius: 999px;
-        overflow: hidden;
-        border: 1px solid var(--border);
-      }
-      .meter > i {
-        display: block;
-        height: 100%;
-        width: 0%;
-        background: linear-gradient(90deg, #22c55e, #eab308, #ef4444);
-      }
-
-      .section {
-        margin-top: 18px;
-      }
-      .section h3 {
-        margin: 0 0 10px;
-        font-size: 14px;
-        color: var(--muted);
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-      .partial {
-        padding: 18px;
-        border-radius: 14px;
-        border: 1px dashed var(--border);
-        background: var(--panel);
-        font-size: 18px;
-        min-height: 54px;
-        display: flex;
-        align-items: center;
-        color: var(--text);
-      }
-      .muted {
-        color: var(--muted);
-      }
-
+      *{box-sizing:border-box}
+      body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+      .container{max-width:980px;margin:28px auto;padding:0 16px}
+      .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow)}
+      header.card{padding:16px 18px;display:flex;align-items:center;gap:14px;justify-content:space-between}
+      .title{display:flex;gap:10px;align-items:center;font-weight:700;letter-spacing:.2px}
+      .title .badge{font-weight:600;font-size:12px;padding:4px 8px;border-radius:999px;background:var(--chip);color:var(--brand);border:1px solid var(--border)}
+      .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+      button,.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:12px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);cursor:pointer;transition:transform .02s ease}
+      button:active{transform:translateY(1px)}
+      button.primary{background:var(--brand);color:#fff;border-color:transparent}
+      button.ghost{background:transparent}
+      button:disabled{opacity:.55;cursor:not-allowed}
+      .dot{width:10px;height:10px;border-radius:50%;background:#888}
+      .dot.live{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent)}
+      .dot.ws{background:#cbd5e1}
+      .dot.ws.on{background:var(--ok)}
+      .row{margin-top:14px;display:grid;grid-template-columns:1fr;gap:14px}
+      .meters{display:flex;gap:12px;align-items:center;color:var(--muted)}
+      .meter{height:8px;width:160px;background:var(--panel-2);border-radius:999px;overflow:hidden;border:1px solid var(--border)}
+      .meter>i{display:block;height:100%;width:0%;background:linear-gradient(90deg,#22c55e,#eab308,#ef4444)}
+      .section{margin-top:18px}
+      .section h3{margin:0 0 10px;font-size:14px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
       /* final transcript list */
-      .list {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-      .line {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-        padding: 14px;
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        background: var(--panel);
-      }
-      .line .time {
-        font-size: 11px;
-        color: var(--muted);
-        width: 64px;
-        text-align: right;
-      }
-      .line .text {
-        flex: 1;
-        font-size: 16px;
-      }
-      .line .play {
-        min-width: 44px;
-      }
-
+      .list{display:flex;flex-direction:column;gap:10px}
+      .line{display:flex;gap:10px;align-items:center;padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--panel)}
+      .line .time{font-size:11px;color:var(--muted);width:64px;text-align:right}
+      .line .text{flex:1;font-size:16px}
+      .line .play{min-width:44px}
       /* footer / debug */
-      .debug.card {
-        margin-top: 16px;
-      }
-      .debugHeader {
-        padding: 10px 14px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        cursor: pointer;
-      }
-      .debugBody {
-        padding: 0 14px 14px;
-        display: none;
-      }
-      .debug pre {
-        margin: 0;
-        max-height: 240px;
-        overflow: auto;
-        background: var(--panel-2);
-        border: 1px solid var(--border);
-        padding: 10px;
-        border-radius: 10px;
-      }
-
-      .pill {
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: var(--panel-2);
-        border: 1px solid var(--border);
-        color: var(--muted);
-        font-size: 12px;
-      }
-      .slider {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-      input[type="range"] {
-        width: 160px;
-      }
-      a.small {
-        font-size: 12px;
-        color: var(--brand);
-        text-decoration: none;
-      }
+      .debug.card{margin-top:16px}
+      .debugHeader{padding:10px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer}
+      .debugBody{padding:0 14px 14px;display:none}
+      .debug pre{margin:0;max-height:240px;overflow:auto;background:var(--panel-2);border:1px solid var(--border);padding:10px;border-radius:10px}
+      .pill{padding:4px 8px;border-radius:999px;background:var(--panel-2);border:1px solid var(--border);color:var(--muted);font-size:12px}
+      .slider{display:flex;align-items:center;gap:10px}
+      input[type="range"]{width:160px}
+      a.small{font-size:12px;color:var(--brand);text-decoration:none}
     </style>
   </head>
   <body>
@@ -272,14 +69,7 @@
         <div class="controls">
           <div class="slider">
             <span class="pill">Gain</span>
-            <input
-              id="gain"
-              type="range"
-              min="1"
-              max="5"
-              value="3"
-              step="0.5"
-            />
+            <input id="gain" type="range" min="1" max="5" value="3" step="0.5" />
             <span id="gainVal" class="muted">3.0×</span>
           </div>
           <span class="pill">WS <span class="dot ws" id="wsDot"></span></span>
@@ -291,16 +81,7 @@
 
       <!-- LIVE STATS -->
       <div class="row">
-        <div
-          class="card"
-          style="
-            padding: 12px 14px;
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            justify-content: space-between;
-          "
-        >
+        <div class="card" style="padding:12px 14px;display:flex;align-items:center;gap:14px;justify-content:space-between">
           <div class="meters">
             <strong class="muted">Level</strong>
             <div class="meter"><i id="lvl"></i></div>
@@ -308,12 +89,6 @@
           </div>
           <a class="small" href="#" id="clearBtn">Clear results</a>
         </div>
-      </div>
-
-      <!-- PARTIAL -->
-      <div class="section">
-        <h3>Partial</h3>
-        <div id="partial" class="partial muted">Waiting for speech…</div>
       </div>
 
       <!-- FINALS -->
@@ -344,40 +119,24 @@
       // ====== STATE ======
       let ws, audioCtx, scriptNode, source, stream;
       let gain = 3.0;
-      let bytes = 0,
-        chunks = 0;
+      let bytes = 0, chunks = 0;
 
       // ====== UI ======
       const el = (id) => document.getElementById(id);
-      const log = (m) => {
-        const t = new Date().toLocaleTimeString();
-        el("debugLog").textContent += `[${t}] ${m}\n`;
-      };
+      const log = (m) => { const t = new Date().toLocaleTimeString(); el("debugLog").textContent += `[${t}] ${m}\n`; };
       const setWS = (on) => el("wsDot").classList.toggle("on", !!on);
       const setMic = (on) => el("micDot").classList.toggle("live", !!on);
-      const setLevel = (p) =>
-        (el("lvl").style.width = `${Math.max(0, Math.min(100, p))}%`);
-      const updateStats = () =>
-        (el("stats").textContent = `ctx:${
-          audioCtx ? audioCtx.state : "none"
-        } · sr:${audioCtx ? audioCtx.sampleRate : 0}Hz · chunks:${chunks} · ${(
-          bytes / 1024
-        ).toFixed(1)}KB`);
+      const setLevel = (p) => (el("lvl").style.width = `${Math.max(0, Math.min(100, p))}%`);
+      const updateStats = () => (el("stats").textContent = `ctx:${audioCtx ? audioCtx.state : "none"} · sr:${audioCtx ? audioCtx.sampleRate : 0}Hz · chunks:${chunks} · ${(bytes / 1024).toFixed(1)}KB`);
 
       el("debugToggle").onclick = () => {
         const b = el("debugToggle").nextElementSibling;
         b.style.display = b.style.display === "block" ? "none" : "block";
       };
-      el("clearBtn").onclick = (e) => {
-        e.preventDefault();
-        el("final").innerHTML = "";
-      };
+      el("clearBtn").onclick = (e) => { e.preventDefault(); el("final").innerHTML = ""; };
 
       // Gain slider
-      el("gain").addEventListener("input", (e) => {
-        gain = parseFloat(e.target.value);
-        el("gainVal").textContent = `${gain.toFixed(1)}×`;
-      });
+      el("gain").addEventListener("input", (e) => { gain = parseFloat(e.target.value); el("gainVal").textContent = `${gain.toFixed(1)}×`; });
       el("gainVal").textContent = `${gain.toFixed(1)}×`;
 
       // ====== DSP ======
@@ -386,16 +145,11 @@
         const ratio = fromRate / toRate;
         const newLength = Math.round(buffer.length / ratio);
         const result = new Float32Array(newLength);
-        let o = 0,
-          i = 0;
+        let o = 0, i = 0;
         while (o < result.length) {
           const next = Math.round((o + 1) * ratio);
-          let acc = 0,
-            count = 0;
-          for (; i < next && i < buffer.length; i++) {
-            acc += buffer[i];
-            count++;
-          }
+          let acc = 0, count = 0;
+          for (; i < next && i < buffer.length; i++) { acc += buffer[i]; count++; }
           result[o++] = count ? acc / count : 0;
         }
         return result;
@@ -415,30 +169,17 @@
       // ====== MAIN ======
       async function start() {
         log("Start pressed");
-        bytes = 0;
-        chunks = 0;
-        updateStats();
+        bytes = 0; chunks = 0; updateStats();
 
-        // WS
+        // WebSocket
         ws = new WebSocket(WS_URL);
-        ws.onopen = () => {
-          setWS(true);
-          log("WS connected");
-        };
-        ws.onclose = () => {
-          setWS(false);
-          log("WS closed");
-        };
-        ws.onerror = (e) => {
-          log("WS error");
-          console.error(e);
-        };
+        ws.onopen = () => { setWS(true); log("WS connected"); };
+        ws.onclose = () => { setWS(false); log("WS closed"); };
+        ws.onerror = (e) => { log("WS error"); console.error(e); };
         ws.onmessage = (ev) => {
           const msg = JSON.parse(ev.data);
-          if (msg.type === "partial") {
-            el("partial").textContent = msg.text || "…";
-            el("partial").classList.remove("muted");
-          } else if (msg.type === "final") {
+          // Ignore 'partial' messages entirely
+          if (msg.type === "final") {
             const wrap = document.createElement("div");
             wrap.className = "line";
             const t = document.createElement("div");
@@ -446,65 +187,39 @@
             t.textContent = new Date().toLocaleTimeString();
             const txt = document.createElement("div");
             txt.className = "text";
-            txt.textContent = msg.text;
+            txt.textContent = msg.text || "";
             const btn = document.createElement("button");
             btn.className = "btn play";
             btn.textContent = "🔊";
             btn.onclick = async () => {
-              const res = await fetch(
-                `${TTS_URL}?text=${encodeURIComponent(msg.text)}`
-              );
+              const res = await fetch(`${TTS_URL}?text=${encodeURIComponent(msg.text)}`);
               if (!res.ok) return;
               const blob = await res.blob();
               new Audio(URL.createObjectURL(blob)).play();
             };
-            wrap.appendChild(t);
-            wrap.appendChild(txt);
-            wrap.appendChild(btn);
+            wrap.appendChild(t); wrap.appendChild(txt); wrap.appendChild(btn);
             el("final").prepend(wrap);
-            el("partial").textContent = "Waiting for speech…";
-            el("partial").classList.add("muted");
           } else if (msg.type === "error") {
             log("ASR error: " + msg.message);
           }
         };
         await new Promise((res, rej) => {
           const to = setTimeout(() => rej(new Error("WS timeout")), 5000);
-          ws.addEventListener(
-            "open",
-            () => {
-              clearTimeout(to);
-              res();
-            },
-            { once: true }
-          );
-          ws.addEventListener(
-            "error",
-            () => {
-              clearTimeout(to);
-              rej(new Error("WS error"));
-            },
-            { once: true }
-          );
+          ws.addEventListener("open", () => { clearTimeout(to); res(); }, { once: true });
+          ws.addEventListener("error", () => { clearTimeout(to); rej(new Error("WS error")); }, { once: true });
         });
 
         // Mic
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-            channelCount: 1,
-            sampleRate: 48000,
+            echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+            channelCount: 1, sampleRate: 48000,
           },
         });
         setMic(true);
 
         // Audio graph
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-          sampleRate: 48000,
-          latencyHint: "interactive",
-        });
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000, latencyHint: "interactive" });
         await audioCtx.resume();
 
         source = audioCtx.createMediaStreamSource(stream);
@@ -517,20 +232,15 @@
           chunks++;
           const input = e.inputBuffer.getChannelData(0);
 
-          // client-side gain + level meter
+          // client gain + level meter
           let peak = 0;
           for (let i = 0; i < input.length; i++) {
             const s = Math.max(-1, Math.min(1, input[i] * gain));
-            input[i] = s;
-            peak = Math.max(peak, Math.abs(s));
+            input[i] = s; peak = Math.max(peak, Math.abs(s));
           }
           setLevel(peak * 100);
 
-          const down = downsampleBuffer(
-            input,
-            audioCtx.sampleRate,
-            SAMPLE_RATE
-          );
+          const down = downsampleBuffer(input, audioCtx.sampleRate, SAMPLE_RATE);
           if (!down.length) return;
           const pcm16 = floatTo16BitPCM(down);
           ws.send(pcm16);
@@ -546,30 +256,13 @@
 
       function stop() {
         log("Stop pressed");
-        try {
-          if (scriptNode) {
-            scriptNode.disconnect();
-            scriptNode.onaudioprocess = null;
-          }
-        } catch {}
-        try {
-          if (source) source.disconnect();
-        } catch {}
-        try {
-          if (audioCtx && audioCtx.state !== "closed") audioCtx.close();
-        } catch {}
-        try {
-          if (stream) stream.getTracks().forEach((t) => t.stop());
-        } catch {}
-        try {
-          if (ws && ws.readyState === WebSocket.OPEN) ws.close();
-        } catch {}
-        setMic(false);
-        setWS(false);
-        setLevel(0);
-        el("start").disabled = false;
-        el("stop").disabled = true;
-        updateStats();
+        try { if (scriptNode) { scriptNode.disconnect(); scriptNode.onaudioprocess = null; } } catch {}
+        try { if (source) source.disconnect(); } catch {}
+        try { if (audioCtx && audioCtx.state !== "closed") audioCtx.close(); } catch {}
+        try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch {}
+        try { if (ws && ws.readyState === WebSocket.OPEN) ws.close(); } catch {}
+        setMic(false); setWS(false); setLevel(0);
+        el("start").disabled = false; el("stop").disabled = true; updateStats();
       }
 
       document.getElementById("start").onclick = start;
