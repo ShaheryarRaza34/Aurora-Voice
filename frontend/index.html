@@ -1,203 +1,582 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>MS1 — Live ASR + TTS</title>
+    <title>Aurora Voice — Live ASR + TTS</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
+      :root {
+        --bg: #0f1115;
+        --panel: #171a20;
+        --panel-2: #1f2430;
+        --text: #e9eef5;
+        --muted: #a9b2c3;
+        --brand: #6ea8fe;
+        --accent: #8be9fd;
+        --ok: #2ecc71;
+        --warn: #ffd166;
+        --border: #2a2f3a;
+        --chip: #212634;
+        --shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #fbfbfd;
+          --panel: #ffffff;
+          --panel-2: #f4f6fb;
+          --text: #12161c;
+          --muted: #6b7280;
+          --brand: #3b82f6;
+          --accent: #0ea5e9;
+          --ok: #16a34a;
+          --warn: #f59e0b;
+          --border: #e5e7eb;
+          --chip: #eef2ff;
+          --shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
       body {
-        font-family: system-ui, sans-serif;
-        max-width: 820px;
-        margin: 24px auto;
-        padding: 0 12px;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Arial,
+          sans-serif;
       }
-      h1 {
-        font-size: 22px;
+      .container {
+        max-width: 980px;
+        margin: 28px auto;
+        padding: 0 16px;
       }
-      button {
-        padding: 10px 16px;
-        border-radius: 8px;
-        border: 1px solid #ccc;
-        cursor: pointer;
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        box-shadow: var(--shadow);
       }
-      .row {
+      header.card {
+        padding: 16px 18px;
         display: flex;
         align-items: center;
-        gap: 12px;
-        margin-bottom: 16px;
+        gap: 14px;
+        justify-content: space-between;
+      }
+      .title {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+      }
+      .title .badge {
+        font-weight: 600;
+        font-size: 12px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: var(--chip);
+        color: var(--brand);
+        border: 1px solid var(--border);
+      }
+      .controls {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      button,
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: var(--panel-2);
+        color: var(--text);
+        cursor: pointer;
+        transition: transform 0.02s ease;
+      }
+      button:active {
+        transform: translateY(1px);
+      }
+      button.primary {
+        background: var(--brand);
+        color: white;
+        border-color: transparent;
+      }
+      button.ghost {
+        background: transparent;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
       }
       .dot {
         width: 10px;
         height: 10px;
         border-radius: 50%;
-        background: #bbb;
-        display: inline-block;
+        background: #888;
       }
-      .live {
-        background: #0a0;
+      .dot.live {
+        background: var(--ok);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent);
+      }
+      .dot.ws {
+        background: #cbd5e1;
+      }
+      .dot.ws.on {
+        background: var(--ok);
+      }
+      .row {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+
+      .meters {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        color: var(--muted);
+      }
+      .meter {
+        height: 8px;
+        width: 160px;
+        background: var(--panel-2);
+        border-radius: 999px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+      .meter > i {
+        display: block;
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #22c55e, #eab308, #ef4444);
+      }
+
+      .section {
+        margin-top: 18px;
+      }
+      .section h3 {
+        margin: 0 0 10px;
+        font-size: 14px;
+        color: var(--muted);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
       }
       .partial {
-        opacity: 0.6;
-        min-height: 24px;
-        margin: 8px 0;
+        padding: 18px;
+        border-radius: 14px;
+        border: 1px dashed var(--border);
+        background: var(--panel);
+        font-size: 18px;
+        min-height: 54px;
+        display: flex;
+        align-items: center;
+        color: var(--text);
       }
-      .final {
-        margin-top: 12px;
+      .muted {
+        color: var(--muted);
+      }
+
+      /* final transcript list */
+      .list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
       }
       .line {
-        padding: 8px 10px;
-        background: #f7f7f8;
-        border: 1px solid #eee;
-        border-radius: 8px;
-        margin-bottom: 8px;
         display: flex;
+        gap: 10px;
+        align-items: center;
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--panel);
+      }
+      .line .time {
+        font-size: 11px;
+        color: var(--muted);
+        width: 64px;
+        text-align: right;
+      }
+      .line .text {
+        flex: 1;
+        font-size: 16px;
+      }
+      .line .play {
+        min-width: 44px;
+      }
+
+      /* footer / debug */
+      .debug.card {
+        margin-top: 16px;
+      }
+      .debugHeader {
+        padding: 10px 14px;
+        display: flex;
+        align-items: center;
         justify-content: space-between;
+        cursor: pointer;
+      }
+      .debugBody {
+        padding: 0 14px 14px;
+        display: none;
+      }
+      .debug pre {
+        margin: 0;
+        max-height: 240px;
+        overflow: auto;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        padding: 10px;
+        border-radius: 10px;
+      }
+
+      .pill {
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .slider {
+        display: flex;
         align-items: center;
         gap: 10px;
       }
-      .text {
-        flex: 1;
+      input[type="range"] {
+        width: 160px;
       }
-      .play {
-        min-width: 44px;
+      a.small {
+        font-size: 12px;
+        color: var(--brand);
+        text-decoration: none;
       }
     </style>
   </head>
   <body>
-    <h1>🎙️ MS1 — Live Transcription (local) + TTS playback</h1>
-    <div class="row">
-      <button id="start">Start</button>
-      <button id="stop" disabled>Stop</button>
-      <span id="status" class="dot" title="mic status"></span>
-    </div>
+    <div class="container">
+      <!-- HEADER -->
+      <header class="card">
+        <div class="title">
+          <span style="font-size: 20px">🎙️</span>
+          <span>Aurora Voice</span>
+          <span class="badge">MS1</span>
+        </div>
+        <div class="controls">
+          <div class="slider">
+            <span class="pill">Gain</span>
+            <input
+              id="gain"
+              type="range"
+              min="1"
+              max="5"
+              value="3"
+              step="0.5"
+            />
+            <span id="gainVal" class="muted">3.0×</span>
+          </div>
+          <span class="pill">WS <span class="dot ws" id="wsDot"></span></span>
+          <span class="pill">Mic <span class="dot" id="micDot"></span></span>
+          <button id="start" class="primary">Start</button>
+          <button id="stop" class="ghost" disabled>Stop</button>
+        </div>
+      </header>
 
-    <div>
-      <strong>Partial:</strong>
-      <div id="partial" class="partial"></div>
-    </div>
-    <div>
-      <strong>Final:</strong>
-      <div id="final" class="final"></div>
+      <!-- LIVE STATS -->
+      <div class="row">
+        <div
+          class="card"
+          style="
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            justify-content: space-between;
+          "
+        >
+          <div class="meters">
+            <strong class="muted">Level</strong>
+            <div class="meter"><i id="lvl"></i></div>
+            <span id="stats" class="muted">Ready</span>
+          </div>
+          <a class="small" href="#" id="clearBtn">Clear results</a>
+        </div>
+      </div>
+
+      <!-- PARTIAL -->
+      <div class="section">
+        <h3>Partial</h3>
+        <div id="partial" class="partial muted">Waiting for speech…</div>
+      </div>
+
+      <!-- FINALS -->
+      <div class="section">
+        <h3>Final transcripts</h3>
+        <div id="final" class="list"></div>
+      </div>
+
+      <!-- DEBUG -->
+      <div class="debug card">
+        <div class="debugHeader" id="debugToggle">
+          <strong class="muted">Debug</strong>
+          <span class="small">Show/Hide</span>
+        </div>
+        <div class="debugBody">
+          <pre id="debugLog"></pre>
+        </div>
+      </div>
     </div>
 
     <script>
+      // ====== CONFIG ======
+      const WS_URL = "ws://localhost:8000/ws/asr";
+      const TTS_URL = "http://localhost:8000/tts";
       const SAMPLE_RATE = 16000;
-      let ws, audioCtx, node, source, stream;
+      const BUFFER_SIZE = 4096;
 
-      function setLive(on) {
-        document.getElementById("status").classList.toggle("live", !!on);
-      }
+      // ====== STATE ======
+      let ws, audioCtx, scriptNode, source, stream;
+      let gain = 3.0;
+      let bytes = 0,
+        chunks = 0;
 
-      function downsample(buffer, inRate, outRate) {
-        if (outRate === inRate) return buffer;
-        const ratio = inRate / outRate;
-        const newLen = Math.round(buffer.length / ratio);
-        const result = new Float32Array(newLen);
+      // ====== UI ======
+      const el = (id) => document.getElementById(id);
+      const log = (m) => {
+        const t = new Date().toLocaleTimeString();
+        el("debugLog").textContent += `[${t}] ${m}\n`;
+      };
+      const setWS = (on) => el("wsDot").classList.toggle("on", !!on);
+      const setMic = (on) => el("micDot").classList.toggle("live", !!on);
+      const setLevel = (p) =>
+        (el("lvl").style.width = `${Math.max(0, Math.min(100, p))}%`);
+      const updateStats = () =>
+        (el("stats").textContent = `ctx:${
+          audioCtx ? audioCtx.state : "none"
+        } · sr:${audioCtx ? audioCtx.sampleRate : 0}Hz · chunks:${chunks} · ${(
+          bytes / 1024
+        ).toFixed(1)}KB`);
+
+      el("debugToggle").onclick = () => {
+        const b = el("debugToggle").nextElementSibling;
+        b.style.display = b.style.display === "block" ? "none" : "block";
+      };
+      el("clearBtn").onclick = (e) => {
+        e.preventDefault();
+        el("final").innerHTML = "";
+      };
+
+      // Gain slider
+      el("gain").addEventListener("input", (e) => {
+        gain = parseFloat(e.target.value);
+        el("gainVal").textContent = `${gain.toFixed(1)}×`;
+      });
+      el("gainVal").textContent = `${gain.toFixed(1)}×`;
+
+      // ====== DSP ======
+      function downsampleBuffer(buffer, fromRate, toRate) {
+        if (fromRate === toRate) return buffer;
+        const ratio = fromRate / toRate;
+        const newLength = Math.round(buffer.length / ratio);
+        const result = new Float32Array(newLength);
         let o = 0,
           i = 0;
         while (o < result.length) {
           const next = Math.round((o + 1) * ratio);
-          let sum = 0,
+          let acc = 0,
             count = 0;
           for (; i < next && i < buffer.length; i++) {
-            sum += buffer[i];
+            acc += buffer[i];
             count++;
           }
-          result[o++] = sum / count;
+          result[o++] = count ? acc / count : 0;
         }
         return result;
       }
-
       function floatTo16BitPCM(float32) {
-        const out = new Int16Array(float32.length);
-        for (let i = 0; i < float32.length; i++) {
+        const buf = new ArrayBuffer(float32.length * 2);
+        const view = new DataView(buf);
+        let off = 0;
+        for (let i = 0; i < float32.length; i++, off += 2) {
           let s = Math.max(-1, Math.min(1, float32[i]));
-          out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          s = s < 0 ? s * 0x8000 : s * 0x7fff;
+          view.setInt16(off, s, true);
         }
-        return out.buffer;
+        return buf;
       }
 
+      // ====== MAIN ======
       async function start() {
-        ws = new WebSocket("ws://localhost:8000/ws/asr");
-        ws.onopen = () => setLive(true);
-        ws.onclose = () => setLive(false);
+        log("Start pressed");
+        bytes = 0;
+        chunks = 0;
+        updateStats();
+
+        // WS
+        ws = new WebSocket(WS_URL);
+        ws.onopen = () => {
+          setWS(true);
+          log("WS connected");
+        };
+        ws.onclose = () => {
+          setWS(false);
+          log("WS closed");
+        };
+        ws.onerror = (e) => {
+          log("WS error");
+          console.error(e);
+        };
         ws.onmessage = (ev) => {
           const msg = JSON.parse(ev.data);
           if (msg.type === "partial") {
-            document.getElementById("partial").textContent = msg.text;
+            el("partial").textContent = msg.text || "…";
+            el("partial").classList.remove("muted");
           } else if (msg.type === "final") {
             const wrap = document.createElement("div");
             wrap.className = "line";
-
-            const text = document.createElement("div");
-            text.className = "text";
-            text.textContent = msg.text;
-
+            const t = document.createElement("div");
+            t.className = "time";
+            t.textContent = new Date().toLocaleTimeString();
+            const txt = document.createElement("div");
+            txt.className = "text";
+            txt.textContent = msg.text;
             const btn = document.createElement("button");
-            btn.className = "play";
+            btn.className = "btn play";
             btn.textContent = "🔊";
             btn.onclick = async () => {
               const res = await fetch(
-                "http://localhost:8000/tts?text=" + encodeURIComponent(msg.text)
+                `${TTS_URL}?text=${encodeURIComponent(msg.text)}`
               );
-              if (!res.ok) {
-                alert("TTS error");
-                return;
-              }
+              if (!res.ok) return;
               const blob = await res.blob();
-              const url = URL.createObjectURL(blob);
-              const audio = new Audio(url);
-              audio.play();
+              new Audio(URL.createObjectURL(blob)).play();
             };
-
-            wrap.appendChild(text);
+            wrap.appendChild(t);
+            wrap.appendChild(txt);
             wrap.appendChild(btn);
-            document.getElementById("final").appendChild(wrap);
-            document.getElementById("partial").textContent = "";
+            el("final").prepend(wrap);
+            el("partial").textContent = "Waiting for speech…";
+            el("partial").classList.add("muted");
           } else if (msg.type === "error") {
-            alert("ASR error: " + msg.message);
+            log("ASR error: " + msg.message);
           }
         };
-
-        // mic
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true },
+        await new Promise((res, rej) => {
+          const to = setTimeout(() => rej(new Error("WS timeout")), 5000);
+          ws.addEventListener(
+            "open",
+            () => {
+              clearTimeout(to);
+              res();
+            },
+            { once: true }
+          );
+          ws.addEventListener(
+            "error",
+            () => {
+              clearTimeout(to);
+              rej(new Error("WS error"));
+            },
+            { once: true }
+          );
         });
+
+        // Mic
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: 1,
+            sampleRate: 48000,
+          },
+        });
+        setMic(true);
+
+        // Audio graph
         audioCtx = new (window.AudioContext || window.webkitAudioContext)({
           sampleRate: 48000,
+          latencyHint: "interactive",
         });
+        await audioCtx.resume();
+
         source = audioCtx.createMediaStreamSource(stream);
+        scriptNode = audioCtx.createScriptProcessor(BUFFER_SIZE, 1, 1);
+        source.connect(scriptNode);
+        scriptNode.connect(audioCtx.destination);
 
-        node = audioCtx.createScriptProcessor(4096, 1, 1);
-        source.connect(node);
-        node.connect(audioCtx.destination);
-
-        node.onaudioprocess = (e) => {
-          if (!ws || ws.readyState !== 1) return;
+        scriptNode.onaudioprocess = (e) => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          chunks++;
           const input = e.inputBuffer.getChannelData(0);
-          const down = downsample(input, audioCtx.sampleRate, SAMPLE_RATE);
+
+          // client-side gain + level meter
+          let peak = 0;
+          for (let i = 0; i < input.length; i++) {
+            const s = Math.max(-1, Math.min(1, input[i] * gain));
+            input[i] = s;
+            peak = Math.max(peak, Math.abs(s));
+          }
+          setLevel(peak * 100);
+
+          const down = downsampleBuffer(
+            input,
+            audioCtx.sampleRate,
+            SAMPLE_RATE
+          );
+          if (!down.length) return;
           const pcm16 = floatTo16BitPCM(down);
           ws.send(pcm16);
+          bytes += pcm16.byteLength;
+
+          if (chunks % 30 === 0) updateStats();
         };
 
-        document.getElementById("start").disabled = true;
-        document.getElementById("stop").disabled = false;
+        el("start").disabled = true;
+        el("stop").disabled = false;
+        updateStats();
       }
 
       function stop() {
-        if (node) node.disconnect();
-        if (source) source.disconnect();
-        if (audioCtx) audioCtx.close();
-        if (stream) stream.getTracks().forEach((t) => t.stop());
-        if (ws && ws.readyState === 1) ws.close();
-
-        document.getElementById("start").disabled = false;
-        document.getElementById("stop").disabled = true;
-        setLive(false);
+        log("Stop pressed");
+        try {
+          if (scriptNode) {
+            scriptNode.disconnect();
+            scriptNode.onaudioprocess = null;
+          }
+        } catch {}
+        try {
+          if (source) source.disconnect();
+        } catch {}
+        try {
+          if (audioCtx && audioCtx.state !== "closed") audioCtx.close();
+        } catch {}
+        try {
+          if (stream) stream.getTracks().forEach((t) => t.stop());
+        } catch {}
+        try {
+          if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+        } catch {}
+        setMic(false);
+        setWS(false);
+        setLevel(0);
+        el("start").disabled = false;
+        el("stop").disabled = true;
+        updateStats();
       }
 
       document.getElementById("start").onclick = start;
       document.getElementById("stop").onclick = stop;
+
+      // first render
+      updateStats();
     </script>
   </body>
 </html>
