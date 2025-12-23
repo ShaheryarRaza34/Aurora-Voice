@@ -1,205 +1,421 @@
-# backend/server.py
-import os, time, json, collections, subprocess
+import os
+import time
+import json
+import base64
+import shutil
+import uuid
+import subprocess
+import asyncio
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from collections import deque
 from typing import Deque
 
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from faster_whisper import WhisperModel
 import webrtcvad
 import uvicorn
 
-# -------------------------
-# CONFIG (tuned for accuracy + stability)
-# -------------------------
+from conversation_manager import ConversationManager
+from dialog_manager import DialogManager
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
 SAMPLE_RATE = 16000
-FRAME_MS = 20
-FRAME_BYTES = int(SAMPLE_RATE * (FRAME_MS / 1000)) * 2  # 16-bit PCM
-CHUNK_SECONDS = 2.4          # enough context for phrases
-OVERLAP_SECONDS = 0.6
-PARTIAL_EMIT_SEC = 0.5
-FINAL_SILENCE_MS = 1200      # finalize after ~1.2s of silence
+FRAME_MS = 20  # WebRTC VAD requires 10, 20, or 30ms frames
+FRAME_BYTES = int(SAMPLE_RATE * (FRAME_MS / 1000)) * 2  # 16-bit PCM = 2 bytes per sample
 
-# Defaults that work everywhere; override via env when you have a GPU
-ASR_MODEL_NAME = os.getenv("ASR_MODEL", "medium.en")   # English-only model is more accurate for English
-ASR_DEVICE = os.getenv("ASR_DEVICE", "cpu")            # "cpu" or "cuda"
-ASR_COMPUTE = os.getenv("ASR_COMPUTE", "int8")         # great baseline on CPU
+# ASR Config - OPTIMIZED FOR SPEED
+ASR_MODEL_NAME = os.getenv("ASR_MODEL", "tiny.en")  # tiny.en for maximum speed (2-3x faster than base.en)
+ASR_DEVICE = os.getenv("ASR_DEVICE", "cpu")
+ASR_COMPUTE = os.getenv("ASR_COMPUTE", "int8")
 
-# Piper (optional)
-PIPER_BIN = os.getenv("PIPER_BIN", "piper")
-PIPER_MODEL = os.getenv("PIPER_MODEL", "")
-PIPER_OUT = Path(os.getenv("PIPER_OUT", "out.wav")).resolve()
+# TTS Config
+PIPER_BIN = shutil.which("piper") or "/usr/local/bin/piper"
+PIPER_MODEL = os.getenv("PIPER_MODEL", "./models/en_US-amy-low.onnx")
 
-# -------------------------
-# INIT
-# -------------------------
-app = FastAPI(title="Local Voice Assistant (MS1)")
+# Voice Activity Detection - OPTIMIZED FOR SPEED
+VAD_AGGRESSIVENESS = 1  # 0-3, higher = more aggressive filtering
+BUFFER_DURATION_SEC = 10.0  # Keep 10 seconds of audio
+SILENCE_TIMEOUT_MS = 800  # Finalize after 800ms of silence (ultra-responsive!)
+PARTIAL_INTERVAL_SEC = 0.3  # Send partial transcriptions every 300ms (super fast feedback)
+MIN_FINAL_CHARS = 3  # Minimum characters for final transcription
+IGNORED_PHRASES = {
+    "thank you.", "thanks for watching.", "you", 
+    "thank you for watching.", "thanks.", 
+    "thank you very much.", "thank you so much.",
+    "bye.", "goodbye.",
+    ""  # Empty string
+}
+
+# =============================================================================
+# INITIALIZE
+# =============================================================================
+app = FastAPI(title="Aurora Voice Assistant")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-print(f"[INIT] Loading Whisper: {ASR_MODEL_NAME} on {ASR_DEVICE} ({ASR_COMPUTE})")
-model = WhisperModel(ASR_MODEL_NAME, device=ASR_DEVICE, compute_type=ASR_COMPUTE)
-vad = webrtcvad.Vad(1)  # 0-3; 1 is a good balance
+print(f"[INIT] Loading faster-whisper model: {ASR_MODEL_NAME}")
+whisper_model = WhisperModel(
+    ASR_MODEL_NAME,
+    device=ASR_DEVICE,
+    compute_type=ASR_COMPUTE,
+    download_root=None,
+    local_files_only=False
+)
+print(f"[INIT] faster-whisper model loaded")
 
-# -------------------------
-# UTIL
-# -------------------------
-def bytes_to_float32(buf: bytes) -> np.ndarray:
-    # 16-bit little-endian PCM -> float32 [-1, 1]
-    return np.frombuffer(buf, dtype=np.int16).astype(np.float32) / 32768.0
+vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
+print(f"[INIT] VAD initialized with aggressiveness={VAD_AGGRESSIVENESS}")
+
+conversation_manager = ConversationManager()
+dialog_manager = DialogManager(conversation_manager)
+print(f"[INIT] Voice assistant components initialized")
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+def bytes_to_float32(audio_bytes: bytes) -> np.ndarray:
+    """Convert 16-bit PCM bytes to float32 array normalized to [-1, 1]"""
+    int16_array = np.frombuffer(audio_bytes, dtype=np.int16)
+    return int16_array.astype(np.float32) / 32768.0
+
 
 def is_speech(frame_bytes: bytes) -> bool:
-    # WebRTC VAD expects 10/20/30ms frames at 8/16/32kHz
-    return vad.is_speech(frame_bytes, SAMPLE_RATE)
+    """Check if audio frame contains speech using WebRTC VAD"""
+    try:
+        return vad.is_speech(frame_bytes, SAMPLE_RATE)
+    except:
+        return False
 
-# -------------------------
-# ROUTES
-# -------------------------
-@app.get("/")
-def root():
-    return HTMLResponse("<h3>ASR WS at /ws/asr — TTS at /tts?text=...</h3>")
 
-@app.websocket("/ws/asr")
-async def ws_asr(ws: WebSocket):
-    """Receive 16kHz PCM16 frames; send partial/final transcripts."""
-    await ws.accept()
-    ring: Deque[float] = collections.deque(
-        maxlen=int(SAMPLE_RATE * (CHUNK_SECONDS + OVERLAP_SECONDS) * 2)
+def transcribe_audio(audio_array: np.ndarray, beam_size: int = 1) -> str:
+    """Transcribe audio array using faster-whisper - OPTIMIZED FOR SPEED"""
+    if len(audio_array) < SAMPLE_RATE * 0.5:  # Need at least 500ms
+        return ""
+    
+    # faster-whisper returns segments and info
+    segments, info = whisper_model.transcribe(
+        audio_array,
+        task="transcribe",
+        language="en",
+        beam_size=beam_size,  # beam_size=1 for maximum speed
+        condition_on_previous_text=False,
+        temperature=0.0,
+        vad_filter=False,  # We're already doing VAD
+        log_prob_threshold=-1.0,
+        no_speech_threshold=0.6
     )
-    last_emit = 0.0
-    last_speech_time = time.time()
-    have_text = False
-    pending = b""
+    
+    # Collect text from all segments
+    text = " ".join([segment.text for segment in segments]).strip()
+    return text
 
+
+def generate_speech(text: str) -> bytes:
+    """Generate speech using Piper TTS"""
+    if not text.strip():
+        return b""
+    
     try:
-        while True:
-            chunk = await ws.receive_bytes()
-            pending += chunk
-
-            # process in 20 ms steps
-            while len(pending) >= FRAME_BYTES:
-                frame = pending[:FRAME_BYTES]
-                pending = pending[FRAME_BYTES:]
-
-                # endpointing via VAD
-                if is_speech(frame):
-                    last_speech_time = time.time()
-
-                # push into ring buffer
-                ring.extend(bytes_to_float32(frame))
-
-                # emit partials on cadence (need a bit of audio first)
-                if (time.time() - last_emit) > PARTIAL_EMIT_SEC and len(ring) > SAMPLE_RATE * 0.6:
-                    last_emit = time.time()
-                    arr = np.array(ring)
-                    n_ctx = int(SAMPLE_RATE * (CHUNK_SECONDS + OVERLAP_SECONDS))
-                    window = arr[-n_ctx:] if arr.shape[0] > n_ctx else arr
-
-                    # IMPORTANT: English-only & transcription-only for partials
-                    segments, _ = model.transcribe(
-                        window,
-                        task="transcribe",            # force transcription (no translation)
-                        language="en",                # force English
-                        beam_size=1,                  # fast partials
-                        vad_filter=False,
-                        condition_on_previous_text=False,
-                        temperature=0.0,
-                        without_timestamps=True,      # partials don't need timestamps
-                    )
-                    partial = "".join(s.text for s in segments).strip()
-                    if partial:
-                        have_text = True
-                        await ws.send_text(json.dumps({"type": "partial", "text": partial}))
-
-                # finalize on silence
-                if have_text and (time.time() - last_speech_time) * 1000 > FINAL_SILENCE_MS:
-                    arr = np.array(ring)
-
-                    # IMPORTANT: English-only & transcription-only for finals
-                    segments, _ = model.transcribe(
-                        arr,
-                        task="transcribe",            # force transcription (no translation)
-                        language="en",                # force English
-                        beam_size=5,                  # more accurate final
-                        vad_filter=True,
-                        condition_on_previous_text=True,   # use context to avoid drops
-                        temperature=0.0,
-                        word_timestamps=True,
-                    )
-                    final_text = "".join(s.text for s in segments).strip()
-                    words = []
-                    for s in segments:
-                        if s.words:
-                            for w in s.words:
-                                words.append({"word": w.word, "start": float(w.start), "end": float(w.end)})
-
-                    await ws.send_text(json.dumps({"type": "final", "text": final_text, "ts": words}))
-                    # reset state
-                    ring.clear()
-                    have_text = False
-                    last_emit = time.time()
-
-    except WebSocketDisconnect:
-        return
+        print(f"[TTS] Generating speech for: '{text[:50]}...'")
+        
+        with NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+            output_path = tmp_file.name
+        
+        # Run Piper TTS
+        result = subprocess.run(
+            [PIPER_BIN, "--model", PIPER_MODEL, "--output_file", output_path],
+            input=text,
+            text=True,
+            capture_output=True,
+            timeout=30
+        )
+        
+        if result.returncode != 0:
+            print(f"[TTS] Error: {result.stderr}")
+            return b""
+        
+        # Read generated audio
+        audio_data = Path(output_path).read_bytes()
+        Path(output_path).unlink()  # Clean up
+        
+        print(f"[TTS] Generated {len(audio_data)} bytes of audio")
+        return audio_data
+        
     except Exception as e:
+        print(f"[TTS] Exception: {e}")
+        return b""
+
+# =============================================================================
+# WEBSOCKET HANDLER
+# =============================================================================
+
+@app.websocket("/ws/assistant")
+async def websocket_assistant(websocket: WebSocket):
+    await websocket.accept()
+    session_id = str(uuid.uuid4())
+    audio_queue = asyncio.Queue()
+    stop_event = asyncio.Event()
+    
+    print(f"[WS] Session {session_id} connected")
+    
+    # Send ready signal
+    await websocket.send_text(json.dumps({
+        "type": "ready",
+        "session_id": session_id
+    }))
+    
+    # --- TASK 1: RECEIVER (Non-blocking) ---
+    async def receive_audio():
+        """Receive audio data from client without blocking"""
         try:
-            await ws.send_text(json.dumps({"type": "error", "message": str(e)}))
+            while not stop_event.is_set():
+                # Receive either bytes (audio) or text (signals)
+                message = await websocket.receive()
+                
+                if "bytes" in message:
+                    # Audio data
+                    data = message["bytes"]
+                    await audio_queue.put(data)
+                    
+                elif "text" in message:
+                    # Control signal
+                    try:
+                        msg_data = json.loads(message["text"])
+                        if msg_data.get("type") == "signal" and msg_data.get("value") == "end_of_speech":
+                            print(f"[WS] Received end_of_speech signal")
+                            await audio_queue.put("STOP_SIGNAL")  # Poison pill
+                            break  # Stop receiving more data
+                    except json.JSONDecodeError:
+                        print(f"[WS] Invalid JSON in text message")
+                        
+        except WebSocketDisconnect:
+            print(f"[WS] Session {session_id} disconnected")
+            # Put stop signal in queue in case of unexpected disconnect
+            try:
+                await audio_queue.put("STOP_SIGNAL")
+            except:
+                pass
+        except Exception as e:
+            print(f"[WS] Receive error: {e}")
+            try:
+                await audio_queue.put("STOP_SIGNAL")
+            except:
+                pass
+    
+    # --- TASK 2: PROCESSOR (Heavy Work) ---
+    async def process_audio():
+        """Process audio data without blocking the WebSocket"""
+        # State variables
+        pending_bytes = b""
+        max_buffer_samples = int(SAMPLE_RATE * BUFFER_DURATION_SEC)
+        audio_buffer = deque(maxlen=max_buffer_samples)
+        speech_detected = False
+        last_speech_time = time.time()
+        last_partial_time = 0.0
+        
+        try:
+            while True:  # Keep processing until STOP_SIGNAL
+                # Get audio from queue with timeout to check stop_event periodically
+                try:
+                    data = await asyncio.wait_for(audio_queue.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    # Check if we should exit
+                    if stop_event.is_set():
+                        break
+                    continue
+                
+                # Handle stop signal
+                if data == "STOP_SIGNAL":
+                    print(f"[WS] Received STOP_SIGNAL - finalizing...")
+                    
+                    # Finalize any audio in buffer
+                    if speech_detected and len(audio_buffer) > 0:
+                        audio_array = np.array(audio_buffer)
+                        final_text = await asyncio.to_thread(transcribe_audio, audio_array, 1)
+                        
+                        print(f"[WS] Final (on signal): '{final_text}' (len={len(final_text)})")
+                        
+                        # Process if valid
+                        if final_text and len(final_text) >= MIN_FINAL_CHARS and final_text.lower() not in IGNORED_PHRASES:
+                            try:
+                                # Send final transcription
+                                await websocket.send_text(json.dumps({
+                                    "type": "final",
+                                    "text": final_text
+                                }))
+                                
+                                # Process with dialog manager
+                                result = await asyncio.to_thread(dialog_manager.process_user_input, final_text, session_id)
+                                response_text = result["response"]
+                                
+                                # Send response
+                                await websocket.send_text(json.dumps({
+                                    "type": "response",
+                                    "text": response_text,
+                                    "intent": result.get("intent", "unknown")
+                                }))
+                                
+                                print(f"[WS] Response (on signal): '{response_text}'")
+                                
+                                # Generate and send TTS audio
+                                audio_data = await asyncio.to_thread(generate_speech, response_text)
+                                if audio_data:
+                                    audio_b64 = base64.b64encode(audio_data).decode("utf-8")
+                                    await websocket.send_text(json.dumps({
+                                        "type": "audio",
+                                        "data": audio_b64,
+                                        "format": "wav"
+                                    }))
+                                    print(f"[WS] TTS audio sent (on signal) ({len(audio_data)} bytes)")
+                            except Exception as send_error:
+                                print(f"[WS] Error sending final results: {send_error}")
+                    
+                    # Exit gracefully
+                    break
+                
+                # Regular audio data
+                pending_bytes += data
+                
+                # Process complete frames
+                while len(pending_bytes) >= FRAME_BYTES:
+                    frame = pending_bytes[:FRAME_BYTES]
+                    pending_bytes = pending_bytes[FRAME_BYTES:]
+                    
+                    # VAD check
+                    if is_speech(frame):
+                        speech_detected = True
+                        last_speech_time = time.time()
+                    
+                    # Add to buffer
+                    audio_buffer.extend(bytes_to_float32(frame))
+                    
+                    # Calculate silence duration
+                    silence_duration_ms = (time.time() - last_speech_time) * 1000
+                    
+                    # Send partial transcriptions periodically
+                    current_time = time.time()
+                    if speech_detected and (current_time - last_partial_time) >= PARTIAL_INTERVAL_SEC:
+                        last_partial_time = current_time
+                        audio_array = np.array(audio_buffer)
+                        
+                        # Use last 3 seconds for partial transcription
+                        window_samples = min(int(SAMPLE_RATE * 3.0), len(audio_array))
+                        window = audio_array[-window_samples:]
+                        
+                        # Run Whisper in separate thread (beam_size=1 for speed)
+                        partial_text = await asyncio.to_thread(transcribe_audio, window, 1)
+                        
+                        if partial_text and not stop_event.is_set():
+                            try:
+                                await websocket.send_text(json.dumps({
+                                    "type": "partial",
+                                    "text": partial_text
+                                }))
+                                print(f"[WS] Partial: '{partial_text}'")
+                            except Exception as e:
+                                print(f"[WS] Failed to send partial: {e}")
+                                stop_event.set()
+                    
+                    # Finalize on silence
+                    if speech_detected and silence_duration_ms > SILENCE_TIMEOUT_MS:
+                        print(f"[WS] Finalizing after {silence_duration_ms:.0f}ms silence")
+                        
+                        # Get all audio from buffer
+                        audio_array = np.array(audio_buffer)
+                        
+                        # Run Whisper in separate thread (beam_size=1 for maximum speed)
+                        final_text = await asyncio.to_thread(transcribe_audio, audio_array, 1)
+                        
+                        print(f"[WS] Final: '{final_text}' (len={len(final_text)})")
+                        
+                        # Filter and process
+                        if final_text and len(final_text) >= MIN_FINAL_CHARS and final_text.lower() not in IGNORED_PHRASES:
+                            try:
+                                # Send final transcription
+                                if not stop_event.is_set():
+                                    await websocket.send_text(json.dumps({
+                                        "type": "final",
+                                        "text": final_text
+                                    }))
+                                    
+                                    # Process with dialog manager
+                                    result = await asyncio.to_thread(dialog_manager.process_user_input, final_text, session_id)
+                                    response_text = result["response"]
+                                    
+                                    # Send response
+                                    if not stop_event.is_set():
+                                        await websocket.send_text(json.dumps({
+                                            "type": "response",
+                                            "text": response_text,
+                                            "intent": result.get("intent", "unknown")
+                                        }))
+                                        
+                                        print(f"[WS] Response: '{response_text}'")
+                                        
+                                        # Generate and send TTS audio (in thread)
+                                        audio_data = await asyncio.to_thread(generate_speech, response_text)
+                                        if audio_data and not stop_event.is_set():
+                                            audio_b64 = base64.b64encode(audio_data).decode("utf-8")
+                                            await websocket.send_text(json.dumps({
+                                                "type": "audio",
+                                                "data": audio_b64,
+                                                "format": "wav"
+                                            }))
+                                            print(f"[WS] TTS audio sent ({len(audio_data)} bytes)")
+                            except Exception as e:
+                                if not stop_event.is_set():
+                                    try:
+                                        error_msg = f"Sorry, I encountered an error: {str(e)}"
+                                        await websocket.send_text(json.dumps({
+                                            "type": "response",
+                                            "text": error_msg,
+                                            "intent": "error"
+                                        }))
+                                    except:
+                                        pass
+                                print(f"[ERROR] Dialog processing failed: {e}")
+                        
+                        # Reset state
+                        audio_buffer.clear()
+                        speech_detected = False
+                        last_speech_time = time.time()
+                        last_partial_time = 0.0
+        
+        except Exception as e:
+            print(f"[ERROR] Processing error: {e}")
         finally:
-            await ws.close()
-
-from tempfile import NamedTemporaryFile
-from starlette.background import BackgroundTask
-import shutil
-
-@app.get("/tts")
-def tts(text: str):
-    text = (text or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text is empty")
-
-    # Validate piper binary & model path
-    if not shutil.which(PIPER_BIN):
-        return JSONResponse(
-            status_code=400,
-            content={"error": f"PIPER_BIN not found: '{PIPER_BIN}'. Set PIPER_BIN to your piper executable."},
-        )
-
-    model_path = Path(PIPER_MODEL)
-    cfg_path = model_path.with_suffix(model_path.suffix + ".json")  # .onnx.json
-    if not model_path.exists() or not cfg_path.exists():
-        return JSONResponse(
-            status_code=400,
-            content={"error": f"Missing Piper files. Need both:\n{model_path}\n{cfg_path}\nFix your volume mount or PIPER_MODEL."},
-        )
-
+            print(f"[WS] Processing task completed for session {session_id}")
+            stop_event.set()
+    
+    # Run both tasks concurrently
+    await asyncio.gather(receive_audio(), process_audio())
+    
+    # Close WebSocket gracefully
     try:
-        # Unique temp output per request
-        with NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            out_path = Path(tmp.name)
-
-        # Pipe text via stdin (most reliable across platforms)
-        cmd = [PIPER_BIN, "--model", str(model_path), "--output_file", str(out_path)]
-        proc = subprocess.run(cmd, input=text.encode("utf-8"), capture_output=True, check=True)
-
-        if not out_path.exists() or out_path.stat().st_size == 0:
-            err = proc.stderr.decode("utf-8", errors="ignore")
-            raise RuntimeError(f"piper produced no audio. stderr: {err}")
-
-        # Delete the temp file after the response is finished
-        cleanup = BackgroundTask(lambda p=str(out_path): os.path.exists(p) and os.remove(p))
-        return FileResponse(str(out_path), media_type="audio/wav", background=cleanup)
-
-    except subprocess.CalledProcessError as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Piper failed (exit {e.returncode}). stderr: {e.stderr.decode('utf-8', errors='ignore')}"
-        ) from e
+        await websocket.close()
+        print(f"[WS] Connection closed gracefully for session {session_id}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"TTS error: {e}") from e
+        print(f"[WS] Error closing connection: {e}")
+    
+    # Clean up session
+    conversation_manager.clear_session(session_id)
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "model": ASR_MODEL_NAME}
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
