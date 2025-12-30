@@ -33,6 +33,7 @@
         max-width: 800px;
         width: 100%;
         overflow: hidden;
+        position: relative;
       }
 
       .header {
@@ -116,6 +117,32 @@
         flex-direction: column;
         align-items: center;
         gap: 16px;
+      }
+      
+      .new-chat-button {
+        background: #f0f0f0;
+        border: none;
+        border-radius: 50%;
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: absolute;
+        top: 20px;
+        right: 20px;
+      }
+      
+      .new-chat-button:hover {
+        background: #e0e0e0;
+        transform: scale(1.05);
+      }
+      
+      .new-chat-button:active {
+        transform: scale(0.95);
       }
 
       .mic-button {
@@ -211,11 +238,11 @@
         font-size: 11px;
         color: #667eea;
         font-weight: 600;
-        display: none;
+        display: block;
       }
 
-      .partial-transcript:not(:empty)::before {
-        display: block;
+      .partial-transcript.processing::before {
+        content: "⚙️ Processing...";
       }
 
       .processing {
@@ -260,9 +287,10 @@
         </div>
       </div>
 
-      <div class="partial-transcript" id="partialTranscript"></div>
+      <div class="partial-transcript" id="partialTranscript" style="display: none;"></div>
 
       <div class="controls">
+        <button class="new-chat-button" id="newChatButton" title="Start New Chat">💬</button>
         <button class="mic-button" id="micButton">🎤</button>
         <div class="status" id="status">Click microphone to start</div>
         <div class="stats" id="stats"></div>
@@ -281,8 +309,44 @@
       let isActive = false;
       let audioChunksProcessed = 0;
       let currentSampleRate = 16000;
+      
+      // Session ID tied to the current chat conversation
+      // Create a new session when starting a new chat
+      function generateSessionId() {
+        // Generate UUID v4 format
+        const sessionId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          const r = Math.random() * 16 | 0;
+          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+        console.log("[SESSION] Created new chat session ID:", sessionId);
+        return sessionId;
+      }
+      
+      // Current chat session ID (created when first message is sent)
+      let currentChatSessionId = null;
+      
+      // Function to start a new chat session
+      function startNewChat() {
+        // Clear the current session
+        currentChatSessionId = null;
+        
+        // Clear the chat container
+        chatContainer.innerHTML = '';
+        
+        // Close existing WebSocket connection if any
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+        
+        console.log("[SESSION] Started new chat - session will be created on first message");
+        
+        // Show a welcome message
+        addMessage("assistant", "Hello! I'm your voice assistant. Click the microphone to start a new conversation.");
+      }
 
       const micButton = document.getElementById("micButton");
+      const newChatButton = document.getElementById("newChatButton");
       const statusEl = document.getElementById("status");
       const statsEl = document.getElementById("stats");
       const chatContainer = document.getElementById("chatContainer");
@@ -311,11 +375,21 @@
         chatContainer.scrollTop = chatContainer.scrollHeight;
       }
 
-      function showPartialTranscript(text, processing = false) {
+      function showPartialTranscript(text, processing = false, isListening = false) {
         if (processing) {
-          partialTranscriptEl.innerHTML = `${text}<span class="processing"></span>`;
+          // Show processing indicator
+          partialTranscriptEl.className = "partial-transcript processing";
+          partialTranscriptEl.innerHTML = `<span class="processing"></span>`;
+          partialTranscriptEl.style.display = "block";
+        } else if (isListening) {
+          // Show listening indicator
+          partialTranscriptEl.className = "partial-transcript";
+          partialTranscriptEl.innerHTML = `<span class="processing"></span>`;
+          partialTranscriptEl.style.display = "block";
         } else {
-          partialTranscriptEl.textContent = text || "";
+          // Hide when not processing or listening
+          partialTranscriptEl.textContent = "";
+          partialTranscriptEl.style.display = "none";
         }
       }
 
@@ -338,6 +412,20 @@
           ws.onopen = () => {
             console.log("[WS] Connected");
             setStatus("Connected", "connected");
+            
+            // Create a new session ID for this chat if we don't have one
+            if (!currentChatSessionId) {
+              currentChatSessionId = generateSessionId();
+            }
+            
+            // Send chat session_id to backend
+            if (currentChatSessionId) {
+              ws.send(JSON.stringify({
+                type: "session_id",
+                value: currentChatSessionId
+              }));
+              console.log("[WS] Sent chat session_id:", currentChatSessionId);
+            }
             resolved = true;
             resolve();
           };
@@ -365,11 +453,12 @@
               audioContext = null;
             }
 
-            ws = null;
-            isActive = false;
-            micButton.classList.remove("active");
-            micButton.textContent = "🎤";
-            setStatus("Click microphone to start");
+        ws = null;
+        isActive = false;
+        micButton.classList.remove("active");
+        micButton.textContent = "🎤";
+        setStatus("Click microphone to start");
+        showPartialTranscript("", false, false); // Hide listening indicator
 
             if (!resolved && !timedOut) {
               resolved = true;
@@ -384,16 +473,13 @@
 
               if (msg.type === "ready") {
                 console.log("[WS] Backend ready, session:", msg.session_id);
-              } else if (msg.type === "partial") {
-                console.log("[WS] Partial text:", msg.text);
-                showPartialTranscript(msg.text);
               } else if (msg.type === "final") {
                 console.log("[WS] Final text:", msg.text);
-                showPartialTranscript("Processing", true);
+                showPartialTranscript("", true, false); // Show processing
                 addMessage("user", msg.text);
               } else if (msg.type === "response") {
                 console.log("[WS] Response text:", msg.text);
-                showPartialTranscript(""); // Clear processing indicator
+                showPartialTranscript("", false, false); // Clear indicator
                 addMessage("assistant", msg.text);
               } else if (msg.type === "audio") {
                 console.log("[WS] Audio data received");
@@ -494,6 +580,7 @@
           micButton.classList.add("active");
           micButton.textContent = "🔴";
           setStatus("Listening...", "listening");
+          showPartialTranscript("", false, true); // Show listening indicator
         } catch (e) {
           console.error("[ERROR]", e);
           setStatus(`Error: ${e.message}`);
@@ -508,12 +595,15 @@
         micButton.classList.remove("active");
         micButton.textContent = "🎤";
 
-        // Send end-of-speech signal to backend for final processing
+        // Show processing indicator
+        showPartialTranscript("", true, false); // Show processing
+        setStatus("Processing...", "listening");
+
+        // Send end-of-speech signal to backend for transcription
         if (ws && ws.readyState === WebSocket.OPEN) {
           console.log("[STOP] Sending end_of_speech signal...");
           try {
             ws.send(JSON.stringify({ type: "signal", value: "end_of_speech" }));
-            setStatus("Processing final audio...");
           } catch (e) {
             console.error("[STOP] Error sending signal:", e);
           }
@@ -532,6 +622,19 @@
           stop();
         } else {
           start();
+        }
+      });
+      
+      newChatButton.addEventListener("click", () => {
+        if (isActive) {
+          // If recording, stop first
+          stop();
+          // Wait a bit then start new chat
+          setTimeout(() => {
+            startNewChat();
+          }, 500);
+        } else {
+          startNewChat();
         }
       });
 
