@@ -1,203 +1,675 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <title>MS1 — Live ASR + TTS</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aurora Voice Assistant</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>"
+    />
     <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
       body {
-        font-family: system-ui, sans-serif;
-        max-width: 820px;
-        margin: 24px auto;
-        padding: 0 12px;
-      }
-      h1 {
-        font-size: 22px;
-      }
-      button {
-        padding: 10px 16px;
-        border-radius: 8px;
-        border: 1px solid #ccc;
-        cursor: pointer;
-      }
-      .row {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
         display: flex;
+        justify-content: center;
         align-items: center;
-        gap: 12px;
-        margin-bottom: 16px;
+        padding: 20px;
       }
-      .dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: #bbb;
-        display: inline-block;
+
+      .container {
+        background: white;
+        border-radius: 24px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        max-width: 800px;
+        width: 100%;
+        overflow: hidden;
+        position: relative;
       }
-      .live {
-        background: #0a0;
+
+      .header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        text-align: center;
       }
-      .partial {
-        opacity: 0.6;
-        min-height: 24px;
-        margin: 8px 0;
-      }
-      .final {
-        margin-top: 12px;
-      }
-      .line {
-        padding: 8px 10px;
-        background: #f7f7f8;
-        border: 1px solid #eee;
-        border-radius: 8px;
+
+      .header h1 {
+        font-size: 32px;
         margin-bottom: 8px;
+      }
+
+      .header p {
+        opacity: 0.9;
+        font-size: 14px;
+      }
+
+      .chat-container {
+        height: 400px;
+        overflow-y: auto;
+        padding: 20px;
+        background: #f7f9fc;
+      }
+
+      .message {
+        margin-bottom: 16px;
+        animation: slideIn 0.3s ease-out;
+      }
+
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .message.user {
+        text-align: right;
+      }
+
+      .message.assistant {
+        text-align: left;
+      }
+
+      .message-bubble {
+        display: inline-block;
+        max-width: 70%;
+        padding: 12px 16px;
+        border-radius: 18px;
+        word-wrap: break-word;
+      }
+
+      .message.user .message-bubble {
+        background: #667eea;
+        color: white;
+      }
+
+      .message.assistant .message-bubble {
+        background: white;
+        color: #333;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      .message-label {
+        font-size: 11px;
+        color: #888;
+        margin-bottom: 4px;
+      }
+
+      .controls {
+        padding: 24px;
+        background: white;
+        border-top: 1px solid #e5e7eb;
         display: flex;
-        justify-content: space-between;
+        flex-direction: column;
         align-items: center;
-        gap: 10px;
+        gap: 16px;
       }
-      .text {
-        flex: 1;
+      
+      .new-chat-button {
+        background: #f0f0f0;
+        border: none;
+        border-radius: 50%;
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: absolute;
+        top: 20px;
+        right: 20px;
       }
-      .play {
-        min-width: 44px;
+      
+      .new-chat-button:hover {
+        background: #e0e0e0;
+        transform: scale(1.05);
+      }
+      
+      .new-chat-button:active {
+        transform: scale(0.95);
+      }
+
+      .mic-button {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        border: none;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        font-size: 32px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+      }
+
+      .mic-button:hover {
+        transform: scale(1.05);
+        box-shadow: 0 6px 16px rgba(102, 126, 234, 0.6);
+      }
+
+      .mic-button:active {
+        transform: scale(0.95);
+      }
+
+      .mic-button.active {
+        background: #ef4444;
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+        }
+        50% {
+          box-shadow: 0 0 0 20px rgba(239, 68, 68, 0);
+        }
+      }
+
+      .status {
+        font-size: 14px;
+        color: #666;
+        min-height: 20px;
+      }
+
+      .status.listening {
+        color: #ef4444;
+        font-weight: 600;
+      }
+
+      .status.connected {
+        color: #10b981;
+      }
+
+      .stats {
+        font-size: 12px;
+        color: #999;
+        text-align: center;
+      }
+
+      .partial-transcript {
+        font-style: italic;
+        color: #667eea;
+        padding: 12px 16px;
+        margin: 8px 0;
+        background: #f0f4ff;
+        border-radius: 12px;
+        min-height: 40px;
+        border-left: 4px solid #667eea;
+        transition: all 0.3s ease;
+        position: relative;
+      }
+
+      .partial-transcript:not(:empty) {
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 0.8;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      .partial-transcript::before {
+        content: "🎤 Listening...";
+        position: absolute;
+        top: -20px;
+        left: 0;
+        font-size: 11px;
+        color: #667eea;
+        font-weight: 600;
+        display: block;
+      }
+
+      .partial-transcript.processing::before {
+        content: "⚙️ Processing...";
+      }
+
+      .processing {
+        display: inline-block;
+        margin-left: 8px;
+      }
+
+      .processing::after {
+        content: "...";
+        animation: dots 1.5s steps(4, end) infinite;
+      }
+
+      @keyframes dots {
+        0%,
+        20% {
+          content: ".";
+        }
+        40% {
+          content: "..";
+        }
+        60%,
+        100% {
+          content: "...";
+        }
       }
     </style>
   </head>
   <body>
-    <h1>🎙️ MS1 — Live Transcription (local) + TTS playback</h1>
-    <div class="row">
-      <button id="start">Start</button>
-      <button id="stop" disabled>Stop</button>
-      <span id="status" class="dot" title="mic status"></span>
-    </div>
+    <div class="container">
+      <div class="header">
+        <h1>🎙️ Aurora Voice Assistant</h1>
+        <p>Your personal AI assistant for weather and calendar</p>
+      </div>
 
-    <div>
-      <strong>Partial:</strong>
-      <div id="partial" class="partial"></div>
-    </div>
-    <div>
-      <strong>Final:</strong>
-      <div id="final" class="final"></div>
+      <div class="chat-container" id="chatContainer">
+        <div class="message assistant">
+          <div class="message-label">Assistant</div>
+          <div class="message-bubble">
+            Hello! I'm Aurora, your voice assistant. Press the microphone button
+            and speak to get started.
+          </div>
+        </div>
+      </div>
+
+      <div class="partial-transcript" id="partialTranscript" style="display: none;"></div>
+
+      <div class="controls">
+        <button class="new-chat-button" id="newChatButton" title="Start New Chat">💬</button>
+        <button class="mic-button" id="micButton">🎤</button>
+        <div class="status" id="status">Click microphone to start</div>
+        <div class="stats" id="stats"></div>
+      </div>
     </div>
 
     <script>
-      const SAMPLE_RATE = 16000;
-      let ws, audioCtx, node, source, stream;
+      // Connect directly to backend (bypass nginx) to avoid proxy issues
+      const WS_URL = `ws://127.0.0.1:8000/ws/assistant`;
+      console.log("[INIT] WebSocket URL:", WS_URL);
 
-      function setLive(on) {
-        document.getElementById("status").classList.toggle("live", !!on);
+      let ws = null;
+      let audioContext = null;
+      let mediaStream = null;
+      let audioWorkletNode = null;
+      let isActive = false;
+      let audioChunksProcessed = 0;
+      let currentSampleRate = 16000;
+      
+      // Session ID tied to the current chat conversation
+      // Create a new session when starting a new chat
+      function generateSessionId() {
+        // Generate UUID v4 format
+        const sessionId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          const r = Math.random() * 16 | 0;
+          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+        console.log("[SESSION] Created new chat session ID:", sessionId);
+        return sessionId;
+      }
+      
+      // Current chat session ID (created when first message is sent)
+      let currentChatSessionId = null;
+      
+      // Function to start a new chat session
+      function startNewChat() {
+        // Clear the current session
+        currentChatSessionId = null;
+        
+        // Clear the chat container
+        chatContainer.innerHTML = '';
+        
+        // Close existing WebSocket connection if any
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+        
+        console.log("[SESSION] Started new chat - session will be created on first message");
+        
+        // Show a welcome message
+        addMessage("assistant", "Hello! I'm your voice assistant. Click the microphone to start a new conversation.");
       }
 
-      function downsample(buffer, inRate, outRate) {
-        if (outRate === inRate) return buffer;
-        const ratio = inRate / outRate;
-        const newLen = Math.round(buffer.length / ratio);
-        const result = new Float32Array(newLen);
-        let o = 0,
-          i = 0;
-        while (o < result.length) {
-          const next = Math.round((o + 1) * ratio);
-          let sum = 0,
-            count = 0;
-          for (; i < next && i < buffer.length; i++) {
-            sum += buffer[i];
-            count++;
+      const micButton = document.getElementById("micButton");
+      const newChatButton = document.getElementById("newChatButton");
+      const statusEl = document.getElementById("status");
+      const statsEl = document.getElementById("stats");
+      const chatContainer = document.getElementById("chatContainer");
+      const partialTranscriptEl = document.getElementById("partialTranscript");
+
+      // UI Helpers
+      function setStatus(text, className = "") {
+        statusEl.textContent = text;
+        statusEl.className = `status ${className}`;
+      }
+
+      function updateStats() {
+        statsEl.textContent = `Audio chunks: ${audioChunksProcessed}`;
+      }
+
+      function addMessage(role, text) {
+        const messageDiv = document.createElement("div");
+        messageDiv.className = `message ${role}`;
+        messageDiv.innerHTML = `
+                <div class="message-label">${
+                  role === "user" ? "You" : "Assistant"
+                }</div>
+                <div class="message-bubble">${text}</div>
+            `;
+        chatContainer.appendChild(messageDiv);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
+
+      function showPartialTranscript(text, processing = false, isListening = false) {
+        if (processing) {
+          // Show processing indicator
+          partialTranscriptEl.className = "partial-transcript processing";
+          partialTranscriptEl.innerHTML = `<span class="processing"></span>`;
+          partialTranscriptEl.style.display = "block";
+        } else if (isListening) {
+          // Show listening indicator
+          partialTranscriptEl.className = "partial-transcript";
+          partialTranscriptEl.innerHTML = `<span class="processing"></span>`;
+          partialTranscriptEl.style.display = "block";
+        } else {
+          // Hide when not processing or listening
+          partialTranscriptEl.textContent = "";
+          partialTranscriptEl.style.display = "none";
+        }
+      }
+
+      // Store current audio for interruption
+      let currentAudio = null;
+      
+      function playAudioResponse(base64Data) {
+        try {
+          // Stop any currently playing audio
+          if (currentAudio) {
+            currentAudio.pause();
+            currentAudio.currentTime = 0;
+            currentAudio = null;
           }
-          result[o++] = sum / count;
+          
+          const audio = new Audio(`data:audio/wav;base64,${base64Data}`);
+          currentAudio = audio;
+          
+          // Clear reference when audio finishes
+          audio.addEventListener('ended', () => {
+            if (currentAudio === audio) {
+              currentAudio = null;
+            }
+          });
+          
+          audio.play().catch((e) => console.error("Audio playback error:", e));
+        } catch (e) {
+          console.error("Audio decode error:", e);
         }
-        return result;
+      }
+      
+      function stopCurrentAudio() {
+        if (currentAudio) {
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
+          currentAudio = null;
+        }
       }
 
-      function floatTo16BitPCM(float32) {
-        const out = new Int16Array(float32.length);
-        for (let i = 0; i < float32.length; i++) {
-          let s = Math.max(-1, Math.min(1, float32[i]));
-          out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-        }
-        return out.buffer;
-      }
+      // WebSocket Setup
+      async function connectWebSocket() {
+        return new Promise((resolve, reject) => {
+          ws = new WebSocket(WS_URL);
+          let resolved = false;
+          let timedOut = false;
 
-      async function start() {
-        ws = new WebSocket("ws://localhost:8000/ws/asr");
-        ws.onopen = () => setLive(true);
-        ws.onclose = () => setLive(false);
-        ws.onmessage = (ev) => {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === "partial") {
-            document.getElementById("partial").textContent = msg.text;
-          } else if (msg.type === "final") {
-            const wrap = document.createElement("div");
-            wrap.className = "line";
+          ws.onopen = () => {
+            console.log("[WS] Connected");
+            setStatus("Connected", "connected");
+            
+            // Create a new session ID for this chat if we don't have one
+            if (!currentChatSessionId) {
+              currentChatSessionId = generateSessionId();
+            }
+            
+            // Send chat session_id to backend
+            if (currentChatSessionId) {
+              ws.send(JSON.stringify({
+                type: "session_id",
+                value: currentChatSessionId
+              }));
+              console.log("[WS] Sent chat session_id:", currentChatSessionId);
+            }
+            resolved = true;
+            resolve();
+          };
 
-            const text = document.createElement("div");
-            text.className = "text";
-            text.textContent = msg.text;
+          ws.onerror = (e) => {
+            console.error("[WS] Error:", e);
+            if (!resolved) {
+              resolved = true;
+              reject(new Error("WebSocket connection failed"));
+            }
+          };
 
-            const btn = document.createElement("button");
-            btn.className = "play";
-            btn.textContent = "🔊";
-            btn.onclick = async () => {
-              const res = await fetch(
-                "http://localhost:8000/tts?text=" + encodeURIComponent(msg.text)
-              );
-              if (!res.ok) {
-                alert("TTS error");
-                return;
+          ws.onclose = () => {
+            console.log("[WS] Disconnected (onclose)");
+
+            // Clean up resources when backend closes connection
+            if (mediaStream) {
+              console.log("[CLEANUP] Stopping media stream...");
+              mediaStream.getTracks().forEach((track) => track.stop());
+              mediaStream = null;
+            }
+            if (audioContext && audioContext.state !== "closed") {
+              console.log("[CLEANUP] Closing audio context...");
+              audioContext.close();
+              audioContext = null;
+            }
+
+        ws = null;
+        isActive = false;
+        micButton.classList.remove("active");
+        micButton.textContent = "🎤";
+        setStatus("Click microphone to start");
+        showPartialTranscript("", false, false); // Hide listening indicator
+
+            if (!resolved && !timedOut) {
+              resolved = true;
+              reject(new Error("WebSocket closed before open"));
+            }
+          };
+
+          ws.onmessage = (event) => {
+            try {
+              const msg = JSON.parse(event.data);
+              console.log("[WS] Received:", msg.type, msg);
+
+              if (msg.type === "ready") {
+                console.log("[WS] Backend ready, session:", msg.session_id);
+              } else if (msg.type === "final") {
+                console.log("[WS] Final text:", msg.text);
+                showPartialTranscript("", true, false); // Show processing
+                addMessage("user", msg.text);
+              } else if (msg.type === "response") {
+                console.log("[WS] Response text:", msg.text);
+                showPartialTranscript("", false, false); // Clear indicator
+                addMessage("assistant", msg.text);
+              } else if (msg.type === "audio") {
+                console.log("[WS] Audio data received");
+                playAudioResponse(msg.data);
+              } else if (msg.type === "error") {
+                console.log("[WS] Error:", msg.message);
+                addMessage("assistant", `Error: ${msg.message}`);
               }
-              const blob = await res.blob();
-              const url = URL.createObjectURL(blob);
-              const audio = new Audio(url);
-              audio.play();
-            };
+            } catch (e) {
+              console.error("[WS] Parse error:", e);
+            }
+          };
 
-            wrap.appendChild(text);
-            wrap.appendChild(btn);
-            document.getElementById("final").appendChild(wrap);
-            document.getElementById("partial").textContent = "";
-          } else if (msg.type === "error") {
-            alert("ASR error: " + msg.message);
+          // Timeout after 15 seconds
+          setTimeout(() => {
+            if (!resolved) {
+              timedOut = true;
+              resolved = true;
+              reject(new Error("WebSocket connection timeout"));
+              try {
+                ws.close();
+              } catch {}
+            }
+          }, 15000);
+        });
+      }
+
+      // Audio Setup
+      async function setupAudio() {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: 16000,
+        });
+        currentSampleRate = audioContext.sampleRate;
+        console.log("[AUDIO] Using sample rate:", currentSampleRate);
+
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            sampleRate: 16000,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        const targetSampleRate = 16000;
+        function floatTo16kPCM(float32Array, inputSampleRate) {
+          if (inputSampleRate === targetSampleRate) {
+            const pcm16 = new Int16Array(float32Array.length);
+            for (let i = 0; i < float32Array.length; i++) {
+              const s = Math.max(-1, Math.min(1, float32Array[i]));
+              pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+            }
+            return pcm16;
           }
+          const ratio = inputSampleRate / targetSampleRate;
+          const newLength = Math.floor(float32Array.length / ratio);
+          const pcm16 = new Int16Array(newLength);
+          for (let i = 0; i < newLength; i++) {
+            const idx = Math.floor(i * ratio);
+            const s = Math.max(-1, Math.min(1, float32Array[idx]));
+            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          }
+          return pcm16;
+        }
+
+        processor.onaudioprocess = (e) => {
+          if (!isActive || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+          const inputData = e.inputBuffer.getChannelData(0);
+          const pcm16 = floatTo16kPCM(inputData, currentSampleRate);
+
+          ws.send(pcm16.buffer);
+          audioChunksProcessed++;
+          updateStats();
         };
 
-        // mic
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true },
-        });
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-          sampleRate: 48000,
-        });
-        source = audioCtx.createMediaStreamSource(stream);
-
-        node = audioCtx.createScriptProcessor(4096, 1, 1);
-        source.connect(node);
-        node.connect(audioCtx.destination);
-
-        node.onaudioprocess = (e) => {
-          if (!ws || ws.readyState !== 1) return;
-          const input = e.inputBuffer.getChannelData(0);
-          const down = downsample(input, audioCtx.sampleRate, SAMPLE_RATE);
-          const pcm16 = floatTo16BitPCM(down);
-          ws.send(pcm16);
-        };
-
-        document.getElementById("start").disabled = true;
-        document.getElementById("stop").disabled = false;
+        source.connect(processor);
+        processor.connect(audioContext.destination);
       }
 
-      function stop() {
-        if (node) node.disconnect();
-        if (source) source.disconnect();
-        if (audioCtx) audioCtx.close();
-        if (stream) stream.getTracks().forEach((t) => t.stop());
-        if (ws && ws.readyState === 1) ws.close();
+      // Start/Stop
+      async function start() {
+        try {
+          // Stop any playing audio when microphone is clicked
+          stopCurrentAudio();
+          
+          // ensure clean state before reconnect
+          await stop(true);
 
-        document.getElementById("start").disabled = false;
-        document.getElementById("stop").disabled = true;
-        setLive(false);
+          setStatus("Connecting...");
+          micButton.textContent = "⏳";
+
+          await connectWebSocket();
+          await setupAudio();
+
+          isActive = true;
+          micButton.classList.add("active");
+          micButton.textContent = "🔴";
+          setStatus("Listening...", "listening");
+          showPartialTranscript("", false, true); // Show listening indicator
+        } catch (e) {
+          console.error("[ERROR]", e);
+          setStatus(`Error: ${e.message}`);
+          micButton.textContent = "🎤";
+          stop();
+        }
       }
 
-      document.getElementById("start").onclick = start;
-      document.getElementById("stop").onclick = stop;
+      async function stop(silent = false) {
+        console.log("[STOP] Stopping assistant...");
+        isActive = false;
+        micButton.classList.remove("active");
+        micButton.textContent = "🎤";
+
+        // Show processing indicator
+        showPartialTranscript("", true, false); // Show processing
+        setStatus("Processing...", "listening");
+
+        // Send end-of-speech signal to backend for transcription
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          console.log("[STOP] Sending end_of_speech signal...");
+          try {
+            ws.send(JSON.stringify({ type: "signal", value: "end_of_speech" }));
+          } catch (e) {
+            console.error("[STOP] Error sending signal:", e);
+          }
+          // Don't close immediately - let backend finish processing
+          // Backend will close the connection after sending final response
+        }
+
+        // Resources will be cleaned up by onclose handler
+        // Just wait for backend to finish processing and close connection
+        console.log("[STOP] Stop complete");
+      }
+
+      // Event Listeners
+      micButton.addEventListener("click", () => {
+        if (isActive) {
+          stop();
+        } else {
+          start();
+        }
+      });
+      
+      newChatButton.addEventListener("click", () => {
+        if (isActive) {
+          // If recording, stop first
+          stop();
+          // Wait a bit then start new chat
+          setTimeout(() => {
+            startNewChat();
+          }, 500);
+        } else {
+          startNewChat();
+        }
+      });
+
+      // Initialize
+      updateStats();
     </script>
   </body>
 </html>

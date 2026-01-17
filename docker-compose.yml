@@ -1,25 +1,71 @@
-version: "3.9"
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: aurora-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Shary1769175!}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-aurora_assistant}
+    ports:
+      - "${MYSQL_PORT:-3307}:3306" # Use 3307 on host to avoid conflicts with existing MySQL
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-p${MYSQL_ROOT_PASSWORD:-Shary1769175!}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
     container_name: aurora-backend
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     environment:
-      ASR_MODEL: "medium"
-      ASR_DEVICE: "cpu"
-      ASR_COMPUTE: "int8"
-      PIPER_MODEL: "/app/models/en_US-amy-low.onnx"
-      PIPER_OUT: "/app/out.wav"
+      ASR_MODEL: ${ASR_MODEL:-tiny.en}
+      ASR_DEVICE: ${ASR_DEVICE:-cpu}
+      ASR_COMPUTE: ${ASR_COMPUTE:-int8}
+      PIPER_MODEL: ${PIPER_MODEL:-/app/models/en_US-amy-low.onnx}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-aurora_assistant}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Shary1769175!}
     volumes:
-      - ./models:/app/models
+      - ./models:/app/models:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import requests; requests.get('http://localhost:8000/health')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   frontend:
     build:
       context: ./frontend
     container_name: aurora-frontend
     ports:
-      - "5173:80"
+      - "${FRONTEND_PORT:-5173}:80"
     depends_on:
       - backend
+
+volumes:
+  mysql_data:

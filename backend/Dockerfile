@@ -1,33 +1,44 @@
-# backend/Dockerfile
-FROM python:3.11-slim
-
-ENV PIP_NO_CACHE_DIR=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-# deps for webrtcvad wheels / building, and audio libs for piper
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libsndfile1 \
-    ffmpeg \
- && rm -rf /var/lib/apt/lists/*
+FROM python:3.10-slim
 
 WORKDIR /app
 
-# install python deps + piper binary
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    pkg-config \
+    gcc \
+    g++ \
+    make \
+    ffmpeg \
+    libavformat-dev \
+    libavcodec-dev \
+    libavutil-dev \
+    libavdevice-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Piper TTS
+RUN wget -O piper.tar.gz https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.tar.gz \
+    && tar -xzf piper.tar.gz \
+    && mv piper /opt/piper \
+    && ln -s /opt/piper/piper /usr/local/bin/piper \
+    && rm piper.tar.gz
+
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/piper
+
+# Install Python dependencies  
 COPY requirements.txt .
-RUN pip install -r requirements.txt && pip install piper-tts
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# app code
-COPY server.py .
+# Download spaCy model (fix download command)
+RUN python -m spacy download en_core_web_sm --direct || \
+    pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
 
+# Copy application code
+COPY *.py ./
+
+# Expose port
 EXPOSE 8000
 
-# env defaults (override in compose if needed)
-ENV ASR_MODEL=medium \
-    ASR_DEVICE=auto \
-    ASR_COMPUTE=int8_float16 \
-    PIPER_MODEL=/app/models/en_US-amy-low.onnx \
-    PIPER_OUT=/app/out.wav
-
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the application
+CMD ["python", "server.py"]
