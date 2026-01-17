@@ -35,12 +35,10 @@ class WeatherService:
                 "days": min(max(1, days), 5)  # Clamp between 1 and 5
             }
             
-            print(f"[WeatherService] Calling API (POST): {self.BASE_URL} with data={data}")
             response = self.session.post(self.BASE_URL, data=data, timeout=10)
             response.raise_for_status()
             
             data = response.json()
-            print(f"[WeatherService] API Response: {data}")
             
             # Check for API error
             if "error" in data:

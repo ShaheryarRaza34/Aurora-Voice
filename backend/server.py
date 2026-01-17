@@ -61,7 +61,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-print(f"[INIT] Loading faster-whisper model: {ASR_MODEL_NAME}")
 whisper_model = WhisperModel(
     ASR_MODEL_NAME,
     device=ASR_DEVICE,
@@ -69,15 +68,12 @@ whisper_model = WhisperModel(
     download_root=None,
     local_files_only=False
 )
-print(f"[INIT] faster-whisper model loaded")
 
 vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
-print(f"[INIT] VAD initialized with aggressiveness={VAD_AGGRESSIVENESS}")
 
 try:
     conversation_manager = ConversationManager()
     dialog_manager = DialogManager(conversation_manager)
-    print(f"[INIT] Voice assistant components initialized")
 except Exception as e:
     print(f"[INIT] ERROR initializing ConversationManager: {e}")
     import traceback
@@ -131,7 +127,6 @@ def generate_speech(text: str) -> bytes:
         return b""
     
     try:
-        print(f"[TTS] Generating speech for: '{text[:50]}...'")
         
         with NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
             output_path = tmp_file.name
@@ -153,7 +148,6 @@ def generate_speech(text: str) -> bytes:
         audio_data = Path(output_path).read_bytes()
         Path(output_path).unlink()  # Clean up
         
-        print(f"[TTS] Generated {len(audio_data)} bytes of audio")
         return audio_data
         
     except Exception as e:
@@ -175,7 +169,6 @@ async def websocket_assistant(websocket: WebSocket):
     audio_queue = asyncio.Queue()
     stop_event = asyncio.Event()
     
-    print(f"[WS] Session {session_id} connected (temporary, waiting for client session_id)")
     
     # Send ready signal immediately
     await websocket.send_text(json.dumps({
@@ -208,25 +201,19 @@ async def websocket_assistant(websocket: WebSocket):
                                 old_session_id = session_id
                                 session_id = msg_data["value"]
                                 session_id_received = True
-                                print(f"[WS] Updated session_id from {old_session_id} to persistent: {session_id}")
-                            else:
-                                print(f"[WS] Received session_id but already using: {session_id}")
                         elif msg_data.get("type") == "signal" and msg_data.get("value") == "end_of_speech":
-                            print(f"[WS] Received end_of_speech signal")
                             await audio_queue.put("STOP_SIGNAL")  # Poison pill
                             break  # Stop receiving more data
                     except json.JSONDecodeError:
-                        print(f"[WS] Invalid JSON in text message")
+                        pass
                         
         except WebSocketDisconnect:
-            print(f"[WS] Session {session_id} disconnected")
             # Put stop signal in queue in case of unexpected disconnect
             try:
                 await audio_queue.put("STOP_SIGNAL")
             except:
                 pass
         except Exception as e:
-            print(f"[WS] Receive error: {e}")
             try:
                 await audio_queue.put("STOP_SIGNAL")
             except:
@@ -253,14 +240,12 @@ async def websocket_assistant(websocket: WebSocket):
                 
                 # Handle stop signal
                 if data == "STOP_SIGNAL":
-                    print(f"[WS] Received STOP_SIGNAL - transcribing entire audio buffer...")
                     
                     # Transcribe entire audio buffer
                     if len(audio_buffer) > 0:
                         audio_array = np.array(audio_buffer)
                         final_text = await asyncio.to_thread(transcribe_audio, audio_array, 1)
                         
-                        print(f"[WS] Transcription result: '{final_text}' (len={len(final_text)})")
                         
                         # Process if valid
                         if final_text and len(final_text) >= MIN_FINAL_CHARS and final_text.lower() not in IGNORED_PHRASES:
@@ -275,14 +260,14 @@ async def websocket_assistant(websocket: WebSocket):
                                 result = await asyncio.to_thread(dialog_manager.process_user_input, final_text, session_id)
                                 response_text = result["response"]
                                 
+                                # Log response before sending (so logs appear before web response)
+                                
                                 # Send response
                                 await websocket.send_text(json.dumps({
                                     "type": "response",
                                     "text": response_text,
                                     "intent": result.get("intent", "unknown")
                                 }))
-                                
-                                print(f"[WS] Response: '{response_text}'")
                                 
                                 # Generate and send TTS audio
                                 audio_data = await asyncio.to_thread(generate_speech, response_text)
@@ -293,7 +278,6 @@ async def websocket_assistant(websocket: WebSocket):
                                         "data": audio_b64,
                                         "format": "wav"
                                     }))
-                                    print(f"[WS] TTS audio sent ({len(audio_data)} bytes)")
                             except Exception as send_error:
                                 print(f"[WS] Error processing request: {send_error}")
                                 try:
@@ -305,8 +289,6 @@ async def websocket_assistant(websocket: WebSocket):
                                     }))
                                 except:
                                     pass
-                        else:
-                            print(f"[WS] Transcription too short or ignored: '{final_text}'")
                     
                     # Exit gracefully
                     break
@@ -325,7 +307,6 @@ async def websocket_assistant(websocket: WebSocket):
         except Exception as e:
             print(f"[ERROR] Processing error: {e}")
         finally:
-            print(f"[WS] Processing task completed for session {session_id}")
             stop_event.set()
     
     # Run both tasks concurrently
@@ -334,7 +315,6 @@ async def websocket_assistant(websocket: WebSocket):
     # Close WebSocket gracefully
     try:
         await websocket.close()
-        print(f"[WS] Connection closed gracefully for session {session_id}")
     except Exception as e:
         print(f"[WS] Error closing connection: {e}")
     

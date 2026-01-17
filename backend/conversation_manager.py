@@ -33,7 +33,6 @@ class ConversationManager:
         
         # Create tables
         self._create_tables()
-        print(f"[ConversationManager] Initialized with MySQL database: {self.mysql_host}:{self.mysql_port}/{self.mysql_database}")
     
     def _connect(self):
         """Create MySQL connection with retry logic"""
@@ -52,7 +51,6 @@ class ConversationManager:
                     charset='utf8mb4',
                     collation='utf8mb4_unicode_ci'
                 )
-                print(f"[ConversationManager] Connected to MySQL on attempt {attempt + 1}")
                 return conn
             except Error as e:
                 if attempt < max_retries - 1:
@@ -106,7 +104,6 @@ class ConversationManager:
             ''')
             
             self.conn.commit()
-            print("[ConversationManager] Database tables created/verified")
         except Error as e:
             print(f"[ConversationManager] Error creating tables: {e}")
             self.conn.rollback()
@@ -119,7 +116,7 @@ class ConversationManager:
         print(f"[ConversationManager.add_turn] START: role={role}, session={session_id[:8]}..., text_len={len(text)}, intent={intent}")
         cursor = None
         try:
-            # 1. Ensure connection is alive
+# Ensure connection is alive
             print(f"[ConversationManager.add_turn] Step 1: Checking connection...")
             if not self.conn.is_connected():
                 print(f"[ConversationManager.add_turn] Step 1: Connection dead, reconnecting...")
@@ -128,17 +125,17 @@ class ConversationManager:
             else:
                 print(f"[ConversationManager.add_turn] Step 1: Connection is alive")
             
-            # 2. Create cursor
+# Create cursor
             print(f"[ConversationManager.add_turn] Step 2: Creating cursor...")
             cursor = self.conn.cursor()
             print(f"[ConversationManager.add_turn] Step 2: Cursor created")
             
-            # 3. Prepare Data
+# Prepare Data
             print(f"[ConversationManager.add_turn] Step 3: Preparing data...")
             entities_json = json.dumps(entities) if entities else None
             print(f"[ConversationManager.add_turn] Step 3: entities_json={'present' if entities_json else 'None'}, text_len={len(text)}")
             
-            # 4. Execute Insert
+# Execute Insert
             print(f"[ConversationManager.add_turn] Step 4: Executing INSERT into messages...")
             query = """
                 INSERT INTO messages (session_id, role, text, intent, entities, timestamp)
@@ -148,7 +145,7 @@ class ConversationManager:
             msg_id = cursor.lastrowid
             print(f"[ConversationManager.add_turn] Step 4: INSERT completed, message_id={msg_id}")
             
-            # 5. Update Session Activity
+# Update Session Activity
             print(f"[ConversationManager.add_turn] Step 5: Updating session activity...")
             session_query = """
                 INSERT INTO sessions (session_id, last_activity)
@@ -158,12 +155,12 @@ class ConversationManager:
             cursor.execute(session_query, (session_id, datetime.now(), datetime.now()))
             print(f"[ConversationManager.add_turn] Step 5: Session activity updated")
             
-            # 6. THE MOST IMPORTANT STEP: COMMIT
+# THE MOST IMPORTANT STEP: COMMIT
             print(f"[ConversationManager.add_turn] Step 6: COMMITTING transaction (message_id={msg_id})...")
             self.conn.commit()
             print(f"[ConversationManager.add_turn] Step 6: COMMIT completed successfully")
             
-            # 7. Verify the data was saved
+# Verify the data was saved
             print(f"[ConversationManager.add_turn] Step 7: Verifying message was saved...")
             verify_cursor = self.conn.cursor()
             verify_cursor.execute('SELECT COUNT(*) FROM messages WHERE id = %s', (msg_id,))
@@ -402,10 +399,7 @@ class ConversationManager:
                         location = json.loads(location)
                     except:
                         pass
-                print(f"[ConversationManager] Found last_location from context_store (current session, updated {row['updated_at']}): {location}")
                 return str(location) if not isinstance(location, str) else location
-            else:
-                print(f"[ConversationManager] No last_location found in context_store for current session")
             
             # If not found in context_store, check recent messages from CURRENT SESSION ONLY
             cursor.execute('''
@@ -416,7 +410,6 @@ class ConversationManager:
             ''', (session_id,))
             
             rows = cursor.fetchall()
-            print(f"[ConversationManager] Searching {len(rows)} weather_query messages from current session for location...")
             for row in rows:
                 # Try to extract location from entities first (most reliable)
                 if row["entities"]:
@@ -429,7 +422,6 @@ class ConversationManager:
                             location = entities["location"]
                             # Store it for current session for future use
                             self.set_context(session_id, "last_location", location)
-                            print(f"[ConversationManager] Found location from entities in message (session {row['session_id']}): {location}")
                             return location
                     except Exception as e:
                         print(f"[ConversationManager] Error parsing entities: {e}")
@@ -447,7 +439,6 @@ class ConversationManager:
                     if location not in skip_words:
                         # Store it for current session for future use
                         self.set_context(session_id, "last_location", location)
-                        print(f"[ConversationManager] Found location from text regex (session {row['session_id']}): {location}")
                         return location
                 # Also try matching location at start of sentence
                 location_match = re.search(r'^([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)', text)
@@ -456,10 +447,8 @@ class ConversationManager:
                     skip_words = {"Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Today", "Tomorrow", "What", "Tell", "Is", "Will", "Can", "Show"}
                     if location not in skip_words and len(location) > 2:
                         self.set_context(session_id, "last_location", location)
-                        print(f"[ConversationManager] Found location from start of text (session {row['session_id']}): {location}")
                         return location
             
-            print(f"[ConversationManager] No location found in recent messages")
             return None
         finally:
             cursor.close()

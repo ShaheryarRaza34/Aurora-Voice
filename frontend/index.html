@@ -393,12 +393,39 @@
         }
       }
 
+      // Store current audio for interruption
+      let currentAudio = null;
+      
       function playAudioResponse(base64Data) {
         try {
+          // Stop any currently playing audio
+          if (currentAudio) {
+            currentAudio.pause();
+            currentAudio.currentTime = 0;
+            currentAudio = null;
+          }
+          
           const audio = new Audio(`data:audio/wav;base64,${base64Data}`);
+          currentAudio = audio;
+          
+          // Clear reference when audio finishes
+          audio.addEventListener('ended', () => {
+            if (currentAudio === audio) {
+              currentAudio = null;
+            }
+          });
+          
           audio.play().catch((e) => console.error("Audio playback error:", e));
         } catch (e) {
           console.error("Audio decode error:", e);
+        }
+      }
+      
+      function stopCurrentAudio() {
+        if (currentAudio) {
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
+          currentAudio = null;
         }
       }
 
@@ -567,6 +594,9 @@
       // Start/Stop
       async function start() {
         try {
+          // Stop any playing audio when microphone is clicked
+          stopCurrentAudio();
+          
           // ensure clean state before reconnect
           await stop(true);
 

@@ -32,23 +32,22 @@ class DialogManager:
         Returns:
             Dictionary with response text and metadata
         """
-        # 1. Get existing context (ONLY from current session - no global fallback)
+# Get existing context (ONLY from current session - no global fallback)
         context = self.conversation_manager.get_context(session_id)
         pending_intent = context.get("pending_intent")
         # Only get history from current session
         history = self.conversation_manager.get_history(session_id)
         
-        # 2. Parse input (Pass history to NLU to help it resolve UNKNOWN intents)
+# Parse input (Pass history to NLU to help it resolve UNKNOWN intents)
         nlu_result = self.nlu.parse(user_input, history)
         intent = nlu_result["intent"]
         entities = nlu_result["entities"]
         
-        # 3. SMART CONTEXT HANDLING
+# SMART CONTEXT HANDLING
         # If the NLU is confused (UNKNOWN) but we are in the middle of a task, 
         # assume the user is answering a follow-up question.
         if pending_intent and intent == Intent.UNKNOWN.value:
             intent = pending_intent
-            print(f"[DialogManager] Recovered intent '{intent}' from context for input: '{user_input}'")
             
             # Specialized recovery for entities (like "Frankfurt" or "1st January")
             # Re-extract entities with the correct intent context
@@ -71,7 +70,6 @@ class DialogManager:
                     last_location = self.conversation_manager.get_last_known_location(session_id)
                     if last_location:
                         entities["location"] = last_location
-                        print(f"[DialogManager] Using last known location from current session: {entities['location']}")
             elif intent in [Intent.CALENDAR_CREATE.value, Intent.CALENDAR_UPDATE.value]:
                 # Re-extract calendar entities to ensure we get description and date
                 calendar_entities = self.nlu._extract_calendar_entities(user_input, user_input.lower())
@@ -86,40 +84,67 @@ class DialogManager:
                 # Explicitly merge with pending_appointment from context
                 pending_appointment = context.get("pending_appointment", {})
                 if pending_appointment:
-                    print(f"[DialogManager] Merging entities with pending_appointment: {pending_appointment}")
                     # Merge: new entities override pending, but keep pending if new is missing
-                    if not entities.get("description") and pending_appointment.get("description"):
-                        entities["description"] = pending_appointment["description"]
-                    if not entities.get("date") and pending_appointment.get("date"):
-                        entities["date"] = pending_appointment["date"]
+                    # For description: be smart - don't overwrite existing good description with suspicious short descriptions
+                    new_description = entities.get("description")
+                    pending_description = pending_appointment.get("description")
+                    if new_description and pending_description:
+                        # Check if new description looks suspicious (short, numeric, might be a time)
+                        new_desc_lower = new_description.lower().strip()
+                        is_suspicious = (
+                            len(new_desc_lower) <= 4 or  # Very short
+                            new_desc_lower.isdigit() or  # All numbers
+                            re.match(r'^\d+\s*[a-z]*$', new_desc_lower) or  # Numbers with letters like "5pm", "5bm"
+                            re.match(r'^\d+\s*[.,!?]*$', new_desc_lower)  # Just numbers with punctuation
+                        )
+                        if is_suspicious:
+                            # Keep the pending description instead of overwriting with suspicious one
+                            entities["description"] = pending_description
+                    elif not new_description and pending_description:
+                        entities["description"] = pending_description
+                    
+                    # For date: be smart - don't overwrite good pending date with suspicious time-like values
+                    new_date = entities.get("date")
+                    pending_date = pending_appointment.get("date")
+                    if new_date and pending_date:
+                        # Check if new date looks suspicious (might be a time like "1700", "17", "12pm")
+                        new_date_lower = new_date.lower().strip()
+                        is_suspicious_date = (
+                            len(new_date_lower) <= 4 or  # Very short (like "17", "1700")
+                            new_date_lower.isdigit() or  # All numbers (like "17", "1700", "2026")
+                            re.match(r'^\d{1,4}$', new_date_lower) or  # Just 1-4 digits (likely a time or year only)
+                            re.match(r'^\d{1,2}(pm|am)$', new_date_lower) or  # Time format like "5pm"
+                            re.match(r'^\d{4}$', new_date_lower)  # Year only like "2026" (should be full date like "March 15, 2026")
+                        )
+                        if is_suspicious_date:
+                            # Keep the pending date instead of overwriting with suspicious one
+                            entities["date"] = pending_date
+                    elif not new_date and pending_date:
+                        entities["date"] = pending_date
                     if not entities.get("time") and pending_appointment.get("time"):
                         entities["time"] = pending_appointment["time"]
-                    print(f"[DialogManager] Merged entities: {entities}")
         
-        # 4. INTENT SWITCHING LOGIC
+# INTENT SWITCHING LOGIC
         # Only clear context if a NEW, DIFFERENT, and VALID intent is detected.
         # Do NOT clear context if intent is UNKNOWN (could be speech recognition error)
         elif pending_intent and intent != pending_intent:
             if intent != Intent.UNKNOWN.value:
                 # Only clear if the new intent is a specific, known intent that's different
                 # This prevents clearing context on speech recognition errors
-                print(f"[DialogManager] Intent switch: {pending_intent} -> {intent}. Clearing old context.")
                 self.conversation_manager.clear_context(session_id)
             else:
                 # If current intent is UNKNOWN, keep the pending intent active
                 # This handles cases like "Frank food" (speech error) when expecting location
                 intent = pending_intent
-                print(f"[DialogManager] Intent is UNKNOWN, keeping pending intent '{intent}' (possible speech recognition error)")
         
-        print(f"[DialogManager] Final Intent: {intent}, Entities: {entities}")
         
-        # 5. Save user turn (with entities so location can be retrieved later)
+# Save user turn (with entities so location can be retrieved later)
         self.conversation_manager.add_turn(session_id, "user", user_input, intent, entities)
         
-        # 6. Handle the intent and generate response (pass user_input for fallback logic)
+# Handle the intent and generate response (pass user_input for fallback logic)
         response_text = self._handle_intent(intent, entities, session_id, user_input)
         
-        # 7. Save assistant turn
+# Save assistant turn
         self.conversation_manager.add_turn(session_id, "assistant", response_text, intent)
         
         return {
@@ -144,16 +169,16 @@ class DialogManager:
             return self._handle_calendar_create(entities, session_id, user_input)
         
         elif intent == Intent.CALENDAR_LIST.value:
-            return self._handle_calendar_list(entities, session_id)
+            return self._handle_calendar_list(entities, session_id, user_input)
         
         elif intent == Intent.CALENDAR_GET.value:
             return self._handle_calendar_get(entities, session_id)
         
         elif intent == Intent.CALENDAR_UPDATE.value:
-            return self._handle_calendar_update(entities, session_id)
+            return self._handle_calendar_update(entities, session_id, user_input)
         
         elif intent == Intent.CALENDAR_DELETE.value:
-            return self._handle_calendar_delete(entities, session_id)
+            return self._handle_calendar_delete(entities, session_id, user_input)
         
         else:
             return self._handle_unknown()
@@ -184,7 +209,6 @@ class DialogManager:
             last_location = self.conversation_manager.get_last_known_location(session_id)
             if last_location:
                 location = last_location
-                print(f"[DialogManager] Resolved 'there' to location from global lookup: {location}")
             # Remove the marker
             if "_needs_location_resolution" in entities:
                 del entities["_needs_location_resolution"]
@@ -195,7 +219,6 @@ class DialogManager:
             last_location = self.conversation_manager.get_last_known_location(session_id)
             if last_location:
                 location = last_location
-                print(f"[DialogManager] Using last known location from database: {location}")
             else:
                 # Second try: Look in recent conversation history
                 history = self.conversation_manager.get_history(session_id, limit=5)
@@ -207,7 +230,6 @@ class DialogManager:
                         location_match = re.search(r'\b(?:in|for|at)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b', assistant_text)
                         if location_match:
                             location = location_match.group(1)
-                            print(f"[DialogManager] Resolved location from conversation history: {location}")
                             break
                     elif turn.get("role") == "user":
                         # Extract location from user's previous query
@@ -215,7 +237,6 @@ class DialogManager:
                         location_match = re.search(r'\b(?:in|for|at)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b', user_text)
                         if location_match:
                             location = location_match.group(1)
-                            print(f"[DialogManager] Resolved location from user's previous query: {location}")
                             break
         
         # If location is still missing, location will remain None (no global fallback)
@@ -233,7 +254,6 @@ class DialogManager:
                 # Try to get default location from context (user preference)
                 default_location = context.get("default_location", "zurich")
                 location = default_location
-                print(f"[DialogManager] Using default location: {location}")
         
         # Store location in context and database for future reference
         if location and location.lower() != "zurich":
@@ -241,7 +261,6 @@ class DialogManager:
             self.conversation_manager.set_context(session_id, "pending_weather", pending_weather)
             # Store as last known location (for cross-session lookup)
             self.conversation_manager.set_context(session_id, "last_location", location)
-            print(f"[DialogManager] Stored location '{location}' in context_store for session {session_id}")
             # Clear pending intent
             self.conversation_manager.set_context(session_id, "pending_intent", None)
         
@@ -287,28 +306,39 @@ class DialogManager:
                 # If not all fields are complete, this is a follow-up
                 if not (has_description and has_date and has_start_time and has_end_time):
                     is_follow_up = True
-                    print(f"[DialogManager] Detected follow-up conversation - using pending_appointment values (pending fields: {pending_fields_count}, current entities: {current_entities_count})")
                 else:
-                    print(f"[DialogManager] All fields complete in pending_appointment - treating as fresh creation")
                     pending_appointment = {}
             else:
-                print(f"[DialogManager] No pending fields - fresh creation")
                 pending_appointment = {}
         else:
-            print(f"[DialogManager] No pending intent or appointment - fresh creation")
             pending_appointment = {}
         
         # Merge entities with pending appointment data (only if follow-up)
         if is_follow_up:
             description = entities.get("description") or pending_appointment.get("description")
             date_str = entities.get("date") or pending_appointment.get("date")
-            start_time = entities.get("start_time") or pending_appointment.get("start_time")
-            end_time = entities.get("end_time") or pending_appointment.get("end_time")
+            # Get start_time from pending first, then entities (entities override only if start_time wasn't in pending)
+            pending_start_time = pending_appointment.get("start_time")
+            entities_start_time = entities.get("start_time")
+            # If we already have start_time in pending and entities also has start_time,
+            # and end_time is missing, treat new start_time as end_time instead
+            if pending_start_time and entities_start_time and not entities.get("end_time") and not pending_appointment.get("end_time"):
+                # We're likely waiting for end_time, so map the new start_time to end_time
+                start_time = pending_start_time
+                end_time = entities_start_time
+            else:
+                start_time = entities_start_time or pending_start_time
+                end_time = entities.get("end_time") or pending_appointment.get("end_time")
             # Fallback to old "time" field if start_time not provided
             if not start_time:
                 time_str = entities.get("time") or pending_appointment.get("time")
                 if time_str:
                     start_time = time_str
+            # Map "time" to "end_time" if end_time is missing but start_time already exists
+            elif not end_time:
+                time_str = entities.get("time") or pending_appointment.get("time")
+                if time_str:
+                    end_time = time_str
         else:
             # Fresh creation - only use current entities
             description = entities.get("description")
@@ -320,11 +350,12 @@ class DialogManager:
                 time_str = entities.get("time")
                 if time_str:
                     start_time = time_str
+            # Map "time" to "end_time" if end_time is missing but start_time already exists
+            elif not end_time:
+                time_str = entities.get("time")
+                if time_str:
+                    end_time = time_str
         
-        print(f"[DialogManager] Calendar create entities: description='{description}', date='{date_str}', start_time='{start_time}', end_time='{end_time}'")
-        print(f"[DialogManager] Full entities dictionary from NLU: {entities}")
-        print(f"[DialogManager] Pending appointment context: {pending_appointment}")
-        print(f"[DialogManager] Is follow-up: {is_follow_up}")
         
         # Check: If user says "12 p.m.", ensure it's treated as time, not date
         # If entities has a "date" that looks like a time (e.g., "12" with pm/am), move it to start_time
@@ -332,13 +363,11 @@ class DialogManager:
             date_value = entities.get("date", "").lower().strip()
             # Check if date looks like a time (contains pm/am or is just a number)
             if "pm" in date_value or "am" in date_value or (date_value.isdigit() and len(date_value) <= 2):
-                print(f"[DialogManager] WARNING: Date '{date_value}' looks like a time, checking if it should be start_time")
                 # If it's a number or has pm/am, it's likely a time, not a date
                 if "pm" in date_value or "am" in date_value or (date_value.isdigit() and int(date_value) <= 23):
                     start_time = date_value.replace('.', '').replace(' ', '')
                     entities["start_time"] = start_time
                     entities["date"] = None  # Clear the incorrect date
-                    print(f"[DialogManager] Moved '{date_value}' from date to start_time: '{start_time}'")
         
         # FALLBACK: If description is missing and user_input is short (likely a follow-up answer)
         # and we're waiting for description, treat entire user_input as description
@@ -352,7 +381,6 @@ class DialogManager:
                 words = [w for w in clean_input.split() if w.lower() not in filler_words]
                 if words:
                     description = " ".join(words)
-                    print(f"[DialogManager] FALLBACK: Using short input '{user_input}' as description: '{description}'")
         
         # FALLBACK: If start_time is missing and user_input is short, treat it as start_time
         if not start_time and pending_appointment and len(user_input.split()) < 5:
@@ -363,19 +391,36 @@ class DialogManager:
                 # Check if it looks like a time (contains numbers and possibly AM/PM)
                 if re.search(r'\d', clean_input):
                     start_time = clean_input
-                    print(f"[DialogManager] FALLBACK: Using short input '{user_input}' as start_time: '{start_time}'")
+        
+        # FALLBACK: If end_time is missing but start_time exists, and user provides a time, map it to end_time
+        # This handles cases where NLU extracts time as "start_time" when we're actually waiting for end_time
+        if not end_time and start_time and pending_appointment:
+            # Check if we're waiting for end_time (have description, date, and start_time already)
+            if pending_appointment.get("description") and pending_appointment.get("date") and pending_appointment.get("start_time"):
+                # If entities has "time" or "start_time" that wasn't used, map it to end_time
+                time_str = entities.get("time") or entities.get("start_time")
+                if time_str:
+                    end_time = time_str
+                # Otherwise, if user_input is short and looks like a time, use it
+                elif len(user_input.split()) < 5:
+                    clean_input = user_input.strip().rstrip('.,!?;:')
+                    if re.search(r'\d', clean_input):
+                        end_time = clean_input
         
         # Check for missing fields - ALL fields are required (description, date, start_time, AND end_time)
         # Also check for empty strings (not just None)
         missing_fields = []
-        if not description or not description.strip():
+        # Debug: Check actual values before missing fields check
+        
+        if not description or (isinstance(description, str) and not description.strip()):
             missing_fields.append("description")
-        if not date_str or not date_str.strip():
+        if not date_str or (isinstance(date_str, str) and not date_str.strip()):
             missing_fields.append("date")
-        if not start_time or not start_time.strip():
+        if not start_time or (isinstance(start_time, str) and not start_time.strip()):
             missing_fields.append("start_time")
-        if not end_time or not end_time.strip():
+        if not end_time or (isinstance(end_time, str) and not end_time.strip()):
             missing_fields.append("end_time")
+        
         
         # If ANY fields are missing, store context and ask for them (DO NOT hit API)
         if missing_fields:
@@ -404,10 +449,23 @@ class DialogManager:
                 elif field == "end_time":
                     return "What time should this appointment end?"
             elif len(missing_fields) == 2:
-                fields_str = " and ".join(missing_fields)
+                # Map field names to user-friendly names
+                field_map = {"description": "description", "date": "date", "start_time": "start time", "end_time": "end time"}
+                friendly_names = [field_map.get(f, f) for f in missing_fields]
+                fields_str = " and ".join(friendly_names)
                 return f"I need {fields_str} for the appointment. Please provide them."
             else:
-                return "I need a description, date, start time, and end time for the appointment. Please provide all of them."
+                # Map field names to user-friendly names and list only missing fields
+                field_map = {"description": "description", "date": "date", "start_time": "start time", "end_time": "end time"}
+                friendly_names = [field_map.get(f, f) for f in missing_fields]
+                # Create a readable list: "description, start time, and end time"
+                if len(friendly_names) > 1:
+                    last_field = friendly_names[-1]
+                    other_fields = ", ".join(friendly_names[:-1])
+                    fields_str = f"{other_fields}, and {last_field}"
+                else:
+                    fields_str = friendly_names[0]
+                return f"I need {fields_str} for the appointment. Please provide all of them."
         
         # ALL required fields present - NOW we can create the appointment
         # Double-check that all fields are actually present (defensive check)
@@ -447,12 +505,24 @@ class DialogManager:
                 elif field == "end_time":
                     return "What time should this appointment end?"
             elif len(missing_fields) == 2:
-                fields_str = " and ".join(missing_fields)
+                # Map field names to user-friendly names
+                field_map = {"description": "description", "date": "date", "start_time": "start time", "end_time": "end time"}
+                friendly_names = [field_map.get(f, f) for f in missing_fields]
+                fields_str = " and ".join(friendly_names)
                 return f"I need {fields_str} for the appointment. Please provide them."
             else:
-                return "I need a description, date, start time, and end time for the appointment. Please provide all of them."
+                # Map field names to user-friendly names and list only missing fields
+                field_map = {"description": "description", "date": "date", "start_time": "start time", "end_time": "end time"}
+                friendly_names = [field_map.get(f, f) for f in missing_fields]
+                # Create a readable list: "description, start time, and end time"
+                if len(friendly_names) > 1:
+                    last_field = friendly_names[-1]
+                    other_fields = ", ".join(friendly_names[:-1])
+                    fields_str = f"{other_fields}, and {last_field}"
+                else:
+                    fields_str = friendly_names[0]
+                return f"I need {fields_str} for the appointment. Please provide all of them."
         
-        print(f"[DialogManager] All fields present. Creating appointment: description='{description}', date='{date_str}', start_time='{start_time}', end_time='{end_time}'")
         
         # Clear pending context before creating
         self.conversation_manager.set_context(session_id, "pending_appointment", {})
@@ -469,19 +539,14 @@ class DialogManager:
             if not end_time or not end_time.strip():
                 raise ValueError("end_time is required")
             
-            print(f"[DialogManager] About to parse times: start_time='{start_time}' (type: {type(start_time)}), end_time='{end_time}' (type: {type(end_time)})")
             
             parsed_start = self.calendar_service.parse_date_time(None, start_time)
-            print(f"[DialogManager] Parsed start_time result: {parsed_start}")
             start_time_parsed = parsed_start["time"]
             
             parsed_end = self.calendar_service.parse_date_time(None, end_time)
-            print(f"[DialogManager] Parsed end_time result: {parsed_end}")
             end_time_parsed = parsed_end["time"]
             
-            print(f"[DialogManager] Parsed date/time: date='{date}', start_time='{start_time_parsed}', end_time='{end_time_parsed}'")
         except Exception as e:
-            print(f"[DialogManager] Date/time parsing error: {e}")
             print(f"[DialogManager] ERROR DETAILS - Entities extracted: {entities}")
             print(f"[DialogManager] ERROR DETAILS - start_time='{start_time}', end_time='{end_time}', date_str='{date_str}'")
             print(f"[DialogManager] ERROR DETAILS - Exception type: {type(e).__name__}, message: {str(e)}")
@@ -509,10 +574,9 @@ class DialogManager:
             else:
                 return f"Sorry, I couldn't create the appointment. {result.get('error')}"
         except Exception as e:
-            print(f"[DialogManager] Appointment creation error: {e}")
             return f"Sorry, I encountered an error creating the appointment: {e}"
     
-    def _handle_calendar_list(self, entities: Dict, session_id: str) -> str:
+    def _handle_calendar_list(self, entities: Dict, session_id: str, user_input: str = "") -> str:
         """Handle calendar listing"""
         result = self.calendar_service.list_appointments()
         
@@ -521,10 +585,99 @@ class DialogManager:
             
             # Check if user asked for "next" or "upcoming" appointment
             scope = entities.get("scope", "all")
+            user_input_lower = user_input.lower() if user_input else ""
+            is_where_query = "where" in user_input_lower or "where is" in user_input_lower
+            
+            # Check if user asked about appointment on a specific date (e.g., "my appointment on 12th January")
+            date_str = entities.get("date")
+            if date_str and scope != "next":
+                # User asked about appointment on a specific date
+                parsed_date = self.calendar_service.parse_date_time(date_str, None)
+                target_date = parsed_date["date"]  # Format: YYYY-MM-DD
+                
+                # Filter appointments matching the date
+                matching_appointments = []
+                for apt in appointments:
+                    apt_start_time = apt.get("start_time", "")
+                    if apt_start_time:
+                        apt_date = apt_start_time.split("T")[0]  # Get YYYY-MM-DD part
+                        if apt_date == target_date:
+                            matching_appointments.append(apt)
+                
+                if len(matching_appointments) == 0:
+                    return f"I couldn't find any appointments on {date_str}."
+                elif len(matching_appointments) == 1:
+                    # Only one appointment on that date
+                    appointment = matching_appointments[0]
+                    appointment_details = self.calendar_service.format_appointment(appointment)
+                    location = appointment.get("location", "").strip()
+                    
+                    if is_where_query:
+                        # User asked "Where is my appointment on 12th January?"
+                        if location:
+                            return f"Your appointment on {date_str} is: {appointment_details}. It's located at {location}."
+                        else:
+                            # Location missing - show details and ask for location
+                            appointment_id = appointment.get("id")
+                            self.conversation_manager.set_context(session_id, "pending_update", {
+                                "appointment_id": appointment_id,
+                                "_update_field": "location"
+                            })
+                            self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                            return f"Your appointment on {date_str} is: {appointment_details}. The location is not set. What should be the location?"
+                    else:
+                        # Regular query - show details with location if available
+                        if location:
+                            return f"Your appointment on {date_str} is: {appointment_details}. Location: {location}."
+                        else:
+                            return f"Your appointment on {date_str} is: {appointment_details}."
+                else:
+                    # Multiple appointments on that date
+                    if is_where_query:
+                        # List all with locations
+                        parts = [f"You have {len(matching_appointments)} appointments on {date_str}:"]
+                        for apt in matching_appointments:
+                            apt_details = self.calendar_service.format_appointment(apt)
+                            apt_location = apt.get("location", "").strip()
+                            if apt_location:
+                                parts.append(f"{apt_details} at {apt_location}")
+                            else:
+                                parts.append(f"{apt_details} (location not set)")
+                        return ". ".join(parts) + "."
+                    else:
+                        # Just list them
+                        return self.calendar_service.format_appointments_list(matching_appointments)
+            
             if scope == "next":
                 next_appointment = self.calendar_service.get_next_appointment(appointments)
                 if next_appointment:
-                    return f"Your next appointment is: {self.calendar_service.format_appointment(next_appointment)}."
+                    # Format appointment details
+                    appointment_details = self.calendar_service.format_appointment(next_appointment)
+                    
+                    # Check if location exists
+                    location = next_appointment.get("location", "").strip()
+                    
+                    if is_where_query:
+                        # User asked "Where is my next appointment?"
+                        if location:
+                            # Location exists - include it in the response
+                            return f"Your next appointment is: {appointment_details}. It's located at {location}."
+                        else:
+                            # Location missing - show details and ask for location
+                            # Store context to update location for this appointment
+                            appointment_id = next_appointment.get("id")
+                            self.conversation_manager.set_context(session_id, "pending_update", {
+                                "appointment_id": appointment_id,
+                                "_update_field": "location"
+                            })
+                            self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                            return f"Your next appointment is: {appointment_details}. The location is not set. What should be the location?"
+                    else:
+                        # Regular "next appointment" query - just show details
+                        if location:
+                            return f"Your next appointment is: {appointment_details}. Location: {location}."
+                        else:
+                            return f"Your next appointment is: {appointment_details}."
                 else:
                     return "You have no upcoming appointments."
             
@@ -557,40 +710,324 @@ class DialogManager:
         else:
             return f"Sorry, I couldn't find that appointment. {result.get('error')}"
     
-    def _handle_calendar_update(self, entities: Dict, session_id: str) -> str:
+    def _handle_calendar_update(self, entities: Dict, session_id: str, user_input: str = "") -> str:
         """Handle updating an appointment"""
         context = self.conversation_manager.get_context(session_id)
         pending_update = context.get("pending_update", {})
         
         appointment_id = entities.get("appointment_id") or pending_update.get("appointment_id")
         description = entities.get("description") or pending_update.get("description")
+        title = entities.get("title") or pending_update.get("title")
         date_str = entities.get("date") or pending_update.get("date")
         time_str = entities.get("time") or pending_update.get("time")
+        start_time_str = entities.get("start_time") or pending_update.get("start_time")
+        end_time_str = entities.get("end_time") or pending_update.get("end_time")
+        location = entities.get("location") or pending_update.get("location")
+        
+        # Detect which field the user wants to update based on keywords in user_input
+        # This helps us ask for missing new values
+        update_field_intent = pending_update.get("_update_field")  # Track which field needs updating
+        
+        user_input_lower = user_input.lower() if user_input else ""
+        if not update_field_intent:
+            # Detect update field intent from user input
+            # Handle variations like "change the place of", "change place of", "change the place", etc.
+            if any(phrase in user_input_lower for phrase in ["change location", "update location", "change the place", "update the place", "change place", "update place", "move to"]):
+                update_field_intent = "location"
+            elif any(phrase in user_input_lower for phrase in ["change title", "update title", "change the title", "update the title"]):
+                update_field_intent = "title"
+            elif any(phrase in user_input_lower for phrase in ["change description", "update description", "change the description", "update the description"]):
+                update_field_intent = "description"
+            elif any(phrase in user_input_lower for phrase in ["change time", "update time", "change the time", "update the time", "reschedule", "change when"]):
+                update_field_intent = "time"
+            elif any(phrase in user_input_lower for phrase in ["change date", "update date", "change the date", "update the date", "move to date"]):
+                update_field_intent = "date"
+        
+        # If update_field_intent is "title" and we have description but no title, use description as title
+        if update_field_intent == "title" and description and not title:
+            title = description
+            description = None  # Clear description since we're updating title
+        
         
         if not appointment_id:
-            # Store what we have and ask for ID
-            if description or date_str or time_str:
+            # Try to find appointment by scope (next, last, etc.) if mentioned
+            user_input_lower = user_input.lower() if user_input else ""
+            if any(phrase in user_input_lower for phrase in ["next appointment", "next meeting", "next event", "upcoming appointment"]):
+                # Find the next appointment
+                list_result = self.calendar_service.list_appointments()
+                if list_result.get("success"):
+                    appointments = list_result.get("appointments", [])
+                    next_appointment = self.calendar_service.get_next_appointment(appointments)
+                    if next_appointment:
+                        appointment_id = next_appointment.get("id")
+                    else:
+                        return "I couldn't find your next appointment."
+                else:
+                    return f"Sorry, I couldn't retrieve your appointments. {list_result.get('error')}"
+            
+            # Try to find appointment(s) by date if date is provided and no appointment_id found yet
+            if not appointment_id and date_str:
+                # Parse the date to find matching appointments
+                parsed_date = self.calendar_service.parse_date_time(date_str, None)
+                target_date = parsed_date["date"]  # Format: YYYY-MM-DD
+                
+                
+                # List all appointments to find matches for the date
+                list_result = self.calendar_service.list_appointments()
+                if list_result.get("success"):
+                    appointments = list_result.get("appointments", [])
+                    # Filter appointments matching the date
+                    matching_appointments = []
+                    for apt in appointments:
+                        apt_start_time = apt.get("start_time", "")
+                        # Extract date from ISO format (YYYY-MM-DDTHH:MM)
+                        if apt_start_time:
+                            apt_date = apt_start_time.split("T")[0]  # Get YYYY-MM-DD part
+                            if apt_date == target_date:
+                                matching_appointments.append(apt)
+                    
+                    
+                    if len(matching_appointments) == 0:
+                        # No appointments found for that date
+                        return f"I couldn't find any appointments on {date_str}. Please check the date or provide the appointment ID."
+                    elif len(matching_appointments) == 1:
+                        # Only one appointment - check if we have the new value
+                        if update_field_intent:
+                            if update_field_intent == "location" and not location:
+                                # Store context and ask for location
+                                pending_update["_update_field"] = update_field_intent
+                                pending_update["description"] = description
+                                pending_update["date"] = date_str
+                                pending_update["time"] = time_str
+                                pending_update["appointment_id"] = matching_appointments[0]["id"]
+                                self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                                self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                                apt_title = matching_appointments[0].get("title", matching_appointments[0].get("description", "Untitled"))
+                                return f"I found one appointment on {date_str}: {apt_title}. What should be the new location?"
+                            elif update_field_intent == "title" and not title:
+                                # Store context and ask for title
+                                pending_update["_update_field"] = update_field_intent
+                                pending_update["description"] = description
+                                pending_update["date"] = date_str
+                                pending_update["time"] = time_str
+                                pending_update["location"] = location
+                                pending_update["appointment_id"] = matching_appointments[0]["id"]
+                                self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                                self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                                apt_title = matching_appointments[0].get("title", matching_appointments[0].get("description", "Untitled"))
+                                return f"I found one appointment on {date_str}: {apt_title}. What should be the new title?"
+                            elif update_field_intent == "description" and not description:
+                                # Store context and ask for description
+                                pending_update["_update_field"] = update_field_intent
+                                pending_update["date"] = date_str
+                                pending_update["time"] = time_str
+                                pending_update["location"] = location
+                                pending_update["appointment_id"] = matching_appointments[0]["id"]
+                                self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                                self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                                apt_title = matching_appointments[0].get("title", matching_appointments[0].get("description", "Untitled"))
+                                return f"I found one appointment on {date_str}: {apt_title}. What should be the new description?"
+                            elif update_field_intent == "time" and not time_str:
+                                # Store context and ask for time
+                                pending_update["_update_field"] = update_field_intent
+                                pending_update["description"] = description
+                                pending_update["date"] = date_str
+                                pending_update["location"] = location
+                                pending_update["appointment_id"] = matching_appointments[0]["id"]
+                                self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                                self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                                apt_title = matching_appointments[0].get("title", matching_appointments[0].get("description", "Untitled"))
+                                return f"I found one appointment on {date_str}: {apt_title}. What should be the new time?"
+                        
+                        # Only one appointment - use it directly!
+                        appointment_id = matching_appointments[0]["id"]
+                        # Continue with update (will fall through to update code below)
+                    else:
+                        # Multiple appointments - check if we have the new value, if not ask for it first
+                        if update_field_intent:
+                            new_value = None
+                            if update_field_intent == "location" and not location:
+                                pending_update["_update_field"] = update_field_intent
+                                pending_update["description"] = description
+                                pending_update["date"] = date_str
+                                pending_update["time"] = time_str
+                                self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                                self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                                return f"I found {len(matching_appointments)} appointments on {date_str}. What should be the new location?"
+                            elif update_field_intent == "title" and not title:
+                                pending_update["_update_field"] = update_field_intent
+                                pending_update["description"] = description
+                                pending_update["date"] = date_str
+                                pending_update["time"] = time_str
+                                pending_update["location"] = location
+                                self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                                self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                                return f"I found {len(matching_appointments)} appointments on {date_str}. What should be the new title?"
+                            elif update_field_intent == "description" and not description:
+                                pending_update["_update_field"] = update_field_intent
+                                pending_update["date"] = date_str
+                                pending_update["time"] = time_str
+                                pending_update["location"] = location
+                                self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                                self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                                return f"I found {len(matching_appointments)} appointments on {date_str}. What should be the new description?"
+                            elif update_field_intent == "time" and not time_str:
+                                pending_update["_update_field"] = update_field_intent
+                                pending_update["description"] = description
+                                pending_update["date"] = date_str
+                                pending_update["location"] = location
+                                self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                                self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                                return f"I found {len(matching_appointments)} appointments on {date_str}. What should be the new time?"
+                        
+                        # If we have the new value (or no specific field intent), list appointments and ask which one
+                        pending_update["title"] = title
+                        pending_update["description"] = description
+                        pending_update["date"] = date_str
+                        pending_update["time"] = time_str
+                        pending_update["location"] = location
+                        if update_field_intent:
+                            pending_update["_update_field"] = update_field_intent
+                        self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                        self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                        
+                        # Build list of appointments with descriptions
+                        apt_list = []
+                        for i, apt in enumerate(matching_appointments, 1):
+                            apt_title = apt.get("title", apt.get("description", "Untitled"))
+                            apt_time = apt.get("start_time", "")
+                            # Extract time from ISO format
+                            if apt_time and "T" in apt_time:
+                                time_part = apt_time.split("T")[1][:5]  # Get HH:MM
+                                apt_list.append(f"{i}. {apt_title} at {time_part}")
+                            else:
+                                apt_list.append(f"{i}. {apt_title}")
+                        
+                        return f"I found {len(matching_appointments)} appointments on {date_str}: {', '.join(apt_list)}. Which one would you like to update? Please say the number or appointment ID."
+            
+            # Check if we're waiting for a new value for a specific field
+            if update_field_intent:
+                if update_field_intent == "location" and not location:
+                    # Store context and ask for location
+                    pending_update["_update_field"] = update_field_intent
+                    pending_update["title"] = title
+                    pending_update["description"] = description
+                    pending_update["date"] = date_str
+                    pending_update["time"] = time_str
+                    self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                    self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                    return "What should be the new location?"
+                elif update_field_intent == "title" and not title:
+                    # Store context and ask for title
+                    pending_update["_update_field"] = update_field_intent
+                    pending_update["description"] = description
+                    pending_update["date"] = date_str
+                    pending_update["time"] = time_str
+                    pending_update["location"] = location
+                    self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                    self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                    return "What should be the new title?"
+                elif update_field_intent == "description" and not description:
+                    # Store context and ask for description
+                    pending_update["_update_field"] = update_field_intent
+                    pending_update["date"] = date_str
+                    pending_update["time"] = time_str
+                    pending_update["location"] = location
+                    self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                    self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                    return "What should be the new description?"
+                elif update_field_intent == "time" and not time_str:
+                    # Store context and ask for time
+                    pending_update["_update_field"] = update_field_intent
+                    pending_update["description"] = description
+                    pending_update["date"] = date_str
+                    pending_update["location"] = location
+                    self.conversation_manager.set_context(session_id, "pending_update", pending_update)
+                    self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
+                    return "What should be the new time?"
+            
+            # If no date provided or still no appointment_id, ask for ID
+            if title or description or date_str or time_str or location:
+                pending_update["title"] = title
                 pending_update["description"] = description
                 pending_update["date"] = date_str
                 pending_update["time"] = time_str
+                pending_update["location"] = location
+                if update_field_intent:
+                    pending_update["_update_field"] = update_field_intent
                 self.conversation_manager.set_context(session_id, "pending_update", pending_update)
                 self.conversation_manager.set_context(session_id, "pending_intent", "calendar_update")
-            return "Which appointment would you like to update? Please provide the appointment ID."
+            
+            if not appointment_id:
+                return "Which appointment would you like to update? Please provide the appointment ID or date."
         
-        # Clear context
+        # Clear context after extracting values (but before update)
         self.conversation_manager.set_context(session_id, "pending_update", {})
         self.conversation_manager.set_context(session_id, "pending_intent", None)
         
         # Parse date and time if provided
         date = None
         time = None
-        if date_str or time_str:
-            parsed = self.calendar_service.parse_date_time(date_str, time_str)
-            date = parsed["date"] if date_str else None
-            time = parsed["time"] if time_str else None
+        start_time = None
+        end_time = None
+        
+        # Parse date
+        if date_str:
+            parsed_date = self.calendar_service.parse_date_time(date_str, None)
+            date = parsed_date["date"]
+        
+        # Parse time (single time - for backward compatibility)
+        if time_str:
+            parsed_time = self.calendar_service.parse_date_time(None, time_str)
+            time = parsed_time["time"]
+        
+        # Parse start_time and end_time separately
+        if start_time_str:
+            parsed_start = self.calendar_service.parse_date_time(None, start_time_str)
+            start_time = parsed_start["time"]
+        if end_time_str:
+            parsed_end = self.calendar_service.parse_date_time(None, end_time_str)
+            end_time = parsed_end["time"]
+        
+        # Only send fields that are actually being updated (not fields used to identify the appointment)
+        # If update_field_intent is set, only send that field (plus date if updating date/time)
+        # If update_field_intent is not set, send all provided fields
+        final_title = None
+        final_description = None
+        final_date = None
+        final_time = None
+        final_start_time = None
+        final_end_time = None
+        final_location = None
+        
+        if update_field_intent:
+            # Only update the specific field the user requested
+            if update_field_intent == "title":
+                final_title = title
+            elif update_field_intent == "description":
+                final_description = description
+            elif update_field_intent == "location":
+                final_location = location
+            elif update_field_intent == "date":
+                final_date = date
+                # When updating date, we also need to update start_time and end_time (handled in calendar_service)
+            elif update_field_intent == "time":
+                final_time = time
+                final_start_time = start_time
+                final_end_time = end_time
+        else:
+            # No specific field intent - send all provided fields (user might be updating multiple fields)
+            final_title = title
+            final_description = description
+            final_date = date
+            final_time = time
+            final_start_time = start_time
+            final_end_time = end_time
+            final_location = location
         
         result = self.calendar_service.update_appointment(
-            appointment_id, description=description, date=date, time=time
+            appointment_id, title=final_title, description=final_description, date=final_date, time=final_time, 
+            location=final_location, start_time=final_start_time, end_time=final_end_time
         )
         
         if result["success"]:
@@ -599,16 +1036,34 @@ class DialogManager:
         else:
             return f"Sorry, I couldn't update the appointment. {result.get('error')}"
     
-    def _handle_calendar_delete(self, entities: Dict, session_id: str) -> str:
+    def _handle_calendar_delete(self, entities: Dict, session_id: str, user_input: str = "") -> str:
         """Handle deleting an appointment"""
         context = self.conversation_manager.get_context(session_id)
         pending_delete = context.get("pending_delete", {})
         
         appointment_id = entities.get("appointment_id") or pending_delete.get("appointment_id")
         
-        print(f"[DialogManager] Delete handler - entities: {entities}")
-        print(f"[DialogManager] Delete handler - pending_delete: {pending_delete}")
-        print(f"[DialogManager] Delete handler - appointment_id: {appointment_id} (type: {type(appointment_id)})")
+        
+        # Initialize appointment_title variable
+        appointment_title = None
+        
+        # Check if user is referring to "previously created", "last", "most recent", etc.
+        user_input_lower = user_input.lower() if user_input else ""
+        if not appointment_id and any(phrase in user_input_lower for phrase in ["previously created", "last created", "most recent", "last appointment", "previous appointment", "recently created"]):
+            # Find the most recently created appointment (highest ID)
+            list_result = self.calendar_service.list_appointments()
+            if list_result.get("success"):
+                appointments = list_result.get("appointments", [])
+                if appointments:
+                    # Sort by ID (highest first) - assuming IDs are sequential and higher = more recent
+                    appointments_sorted = sorted(appointments, key=lambda apt: apt.get("id", 0), reverse=True)
+                    most_recent = appointments_sorted[0]
+                    appointment_id = most_recent.get("id")
+                    appointment_title = most_recent.get('title', most_recent.get('description', 'Untitled'))
+                else:
+                    return "I couldn't find any appointments to delete."
+            else:
+                return f"Sorry, I couldn't retrieve your appointments. {list_result.get('error')}"
         
         if not appointment_id:
             # Store context and ask for ID
@@ -627,12 +1082,19 @@ class DialogManager:
         self.conversation_manager.set_context(session_id, "pending_delete", {})
         self.conversation_manager.set_context(session_id, "pending_intent", None)
         
-        print(f"[DialogManager] Calling delete_appointment API with ID: {appointment_id}")
+        # If appointment_title not set yet, try to get it from the appointment before deletion
+        if not appointment_title:
+            get_result = self.calendar_service.get_appointment(appointment_id)
+            if get_result.get("success"):
+                appointment = get_result.get("appointment", {})
+                appointment_title = appointment.get("title", appointment.get("description", f"ID {appointment_id}"))
+            else:
+                appointment_title = f"ID {appointment_id}"
+        
         result = self.calendar_service.delete_appointment(appointment_id)
-        print(f"[DialogManager] Delete API result: {result}")
         
         if result["success"]:
-            return f"Deleted appointment {appointment_id}."
+            return f"Deleted appointment {appointment_title}."
         else:
             return f"Sorry, I couldn't delete the appointment. {result.get('error')}"
     

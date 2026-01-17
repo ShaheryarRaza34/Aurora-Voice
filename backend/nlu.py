@@ -16,7 +16,6 @@ try:
     nlp = spacy.load("en_core_web_sm")
 except:
     import subprocess
-    print("[NLU] Downloading spaCy model...")
     subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"], check=True)
     nlp = spacy.load("en_core_web_sm")
 
@@ -55,27 +54,31 @@ class NLU:
                 r"\b(going to|gonna|will).*\b(rain|snow|sunny|cloudy)\b",
                 r"\b(is it|will it).*\b(rain|snow|sunny|cloudy)\b",
             ],
+            Intent.CALENDAR_DELETE: [
+                r"\b(delete|remove|cancel).*\b(appointment|meeting|event)\b",
+                r"\b(cancel my)\b",
+                r"\b(delete|remove).*\b(previously|last|recent).*\b(created|appointment|meeting|event)\b",
+            ],
             Intent.CALENDAR_CREATE: [
                 r"\b(create|add|schedule|book|make).*\b(appointment|meeting|event)\b",
                 r"\b(schedule me|book me|set up)\b",
+            ],
+            Intent.CALENDAR_UPDATE: [
+                r"\b(update|change|modify|edit|reschedule).*\b(appointment|meeting|event)\b",
+                r"\b(move|shift|postpone)\b",
+                r"\b(change|update|modify|edit)\s+(?:the\s+)?(?:place|location|venue|date|time|title|description)\s+(?:of|for)\s+(?:my|the)?\s*(?:next|upcoming|last|previous|recent).*\b(appointment|meeting|event)\b",
             ],
             Intent.CALENDAR_LIST: [
                 r"\b(list|show|get|what|tell me).*\b(appointments|meetings|events|calendar|schedule)\b",
                 r"\b(what do i have|what's on my|what is on my)\b",
                 r"\b(where|when|what).*\b(next|upcoming).*\b(appointment|meeting|event)\b",
                 r"\b(next|upcoming).*\b(appointment|meeting|event)\b",
+                r"\b(where|when|what|there).*\b(is|are).*\b(my|the).*\b(appointment|meeting|event)\b",
+                r"\b(my|the).*\b(appointment|meeting|event).*\b(on|for)\b",  # "my appointment on 12th January"
             ],
             Intent.CALENDAR_GET: [
                 r"\b(get|show|what is).*\b(appointment|meeting|event)\b.*\b(id|number)\b",
                 r"\b(details of|information about|tell me about).*\b(appointment|meeting|event)\b",
-            ],
-            Intent.CALENDAR_UPDATE: [
-                r"\b(update|change|modify|edit|reschedule).*\b(appointment|meeting|event)\b",
-                r"\b(move|shift|postpone)\b",
-            ],
-            Intent.CALENDAR_DELETE: [
-                r"\b(delete|remove|cancel).*\b(appointment|meeting|event)\b",
-                r"\b(cancel my)\b",
             ],
         }
         
@@ -113,7 +116,6 @@ class NLU:
                             for intent_enum in Intent:
                                 if intent_enum.value == previous_intent:
                                     intent = intent_enum
-                                    print(f"[NLU] Inferred intent from conversation history: {intent.value}")
                                     break
                         break
         
@@ -148,7 +150,6 @@ class NLU:
                     locations = [ent.text for ent in doc.ents if ent.label_ in ["GPE", "LOC"]]
                     if locations:
                         entities["location"] = locations[0]
-                        print(f"[NLU] Extracted location from unknown intent (likely follow-up): {entities['location']}")
             else:
                 # Try calendar first (for appointment descriptions)
                 entities = self._extract_calendar_entities(text, text_lower)
@@ -179,14 +180,12 @@ class NLU:
         if any(word in text_lower for word in ["there", "that place", "that city", "that location"]):
             # Mark that we need to resolve "there" - this will be handled by dialog_manager
             entities["_needs_location_resolution"] = True
-            print(f"[NLU] Detected location reference 'there' in text")
         
         # Extract location using spaCy NER
         doc = nlp(text)
         locations = [ent.text for ent in doc.ents if ent.label_ in ["GPE", "LOC"]]
         if locations:
             entities["location"] = locations[0]
-            print(f"[NLU] Extracted location via spaCy NER: {entities['location']}")
         # If spaCy NER fails, try fuzzy matching against known cities
         elif not entities.get("location"):
             known_cities = ["Frankfurt", "Berlin", "Munich", "Zurich", "Paris", "London", "New York", "Tokyo", "Moscow", "Rome", "Madrid", "Amsterdam", "Vienna", "Stockholm", "Copenhagen", "Dublin", "Brussels", "Warsaw", "Prague", "Budapest", "Athens", "Lisbon", "Oslo", "Helsinki"]
@@ -194,7 +193,6 @@ class NLU:
             fuzzy_result = process.extractOne(text, known_cities, score_cutoff=70)
             if fuzzy_result:
                 entities["location"] = fuzzy_result[0]
-                print(f"[NLU] Extracted location via fuzzy matching: {entities['location']} (score: {fuzzy_result[1]})")
             else:
                 # Try fuzzy matching on individual capitalized words
                 words = text.split()
@@ -204,7 +202,6 @@ class NLU:
                         fuzzy_result = process.extractOne(clean_word, known_cities, score_cutoff=70)
                         if fuzzy_result:
                             entities["location"] = fuzzy_result[0]
-                            print(f"[NLU] Extracted location via fuzzy matching on word '{clean_word}': {entities['location']} (score: {fuzzy_result[1]})")
                             break
         # If no location found and text is short (likely a single-word response), try to extract as location
         if not entities.get("location") and len(text.split()) <= 2:
@@ -217,7 +214,6 @@ class NLU:
                     common_words = {"Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Today", "Tomorrow", "Yes", "No", "Okay", "OK", "What", "Tell", "Is", "Will", "Can", "Show", "How"}
                     if clean_text not in common_words:
                         entities["location"] = clean_text
-                        print(f"[NLU] Extracted single-word location: {entities['location']}")
             # Two words case - handle speech recognition errors (e.g., "Frank food" instead of "Frankfurt")
             elif len(words) == 2:
                 first_word = words[0].strip().rstrip('.,!?;:')
@@ -231,7 +227,6 @@ class NLU:
                         location_prefixes = ["Frank", "New", "San", "Los", "Las", "Saint", "St", "Mount", "Fort", "Port"]
                         if any(first_word.startswith(prefix) for prefix in location_prefixes) or len(first_word) >= 4:
                             entities["location"] = first_word
-                            print(f"[NLU] Extracted location from two-word input (handling speech error): {entities['location']}")
         elif conversation_history:
             # Check for location references like "there", "that place", etc.
             if any(word in text_lower for word in ["there", "that place", "that city", "that location"]):
@@ -244,7 +239,6 @@ class NLU:
                         location_match = re.search(r'\b(?:in|for|at)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\b', assistant_text)
                         if location_match:
                             entities["location"] = location_match.group(1)
-                            print(f"[NLU] Resolved location reference 'there' to: {entities['location']}")
                             break
                     elif turn.get("role") == "user":
                         # Extract location from user's previous query
@@ -253,7 +247,6 @@ class NLU:
                         user_locations = [ent.text for ent in user_doc.ents if ent.label_ in ["GPE", "LOC"]]
                         if user_locations:
                             entities["location"] = user_locations[0]
-                            print(f"[NLU] Resolved location from previous conversation: {entities['location']}")
                             break
         
         # Extract date/time
@@ -287,14 +280,99 @@ class NLU:
         """Extract calendar-related entities (for create/update)"""
         entities = {}
         
+        # First, try to extract appointment_id if this is an update context
+        # Look for patterns like "ID number 6", "Appointment ID is 6", "ID6", "number 6", "6"
+        id_patterns = [
+            r'\b(?:appointment\s+)?id\s*(?:number\s+|is\s+)?(\d+)\b',  # "ID 6", "ID6", "appointment ID 6"
+            r'\b(?:id|number)\s+(?:is\s+)?(\d+)\b',  # "ID is 6", "number 6"
+            r'\bappointment\s+id\s+is\s+(\d+)\b',  # "appointment ID is 6"
+            r'\bid\s*(\d+)\b',  # "ID6" (no space)
+        ]
+        for pattern in id_patterns:
+            id_match = re.search(pattern, text_lower)
+            if id_match:
+                entities["appointment_id"] = int(id_match.group(1))
+                break
+        
+        # If no ID found with patterns, try standalone number (only if context suggests ID is expected)
+        if not entities.get("appointment_id") and len(text.strip()) < 30:
+            # Short text might be just an ID response
+            num_match = re.search(r'^\s*(\d+)\s*\.?\s*$', text.strip())
+            if num_match:
+                # Check if it's a reasonable ID (1-1000, not a time)
+                num = int(num_match.group(1))
+                if 1 <= num <= 1000:
+                    entities["appointment_id"] = num
+        
         doc = nlp(text)
         
+        # Extract location/place for calendar updates (e.g., "Change the place to...")
+        # IMPORTANT: Only extract location if it's a new value, NOT from phrases like "change place for my appointment"
+        # We should NOT extract location from "Change the place for my appointment" - that's just identifying the appointment
+        # We SHOULD extract from "Change the place to Room 205" or "location is Room 205"
+        
+        # Pattern 1: "change location to X" or "location is X" (has new value)
+        # Pattern 1.5: "change location of [appointment] to X" - extract X as new location
+        # Pattern 2: "at X" or "in X" (when it's clearly a location name)
+        location_patterns = [
+            r'(?:change|update|set|move)\s+(?:the\s+)?(?:place|location|venue)\s+of\s+[^\.]+?\s+to\s+([^\.]+?)(?:\s*\.|$)',  # "change location of my next appointment to Room 205"
+            r'(?:change|update|set|move)\s+(?:the\s+)?(?:place|location|venue)\s+to\s+([^\.]+?)(?:\s*\.|$)',  # "change location to Room 205"
+            r'(?:place|location|venue)\s+(?:is|will be|should be)\s+([^\.]+?)(?:\s*\.|$)',  # "location is Room 205"
+        ]
+        for pattern in location_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                location = match.group(1).strip()
+                # Clean up common words at the end
+                location = re.sub(r'\s+(?:for|my|appointment|tomorrow|today|the|a|an)\s*$', '', location).strip()
+                # Don't extract if it contains words like "my appointment" or "for" - that's not a location value
+                if location and len(location) > 1 and not re.search(r'\b(my|appointment|tomorrow|today|for|the|a|an)\b', location.lower()):
+                    entities["location"] = location
+                    break
+        
+        # Pattern 2: "at X" or "in X" when it's clearly a location name (short, capitalized, not common words)
+        if not entities.get("location"):
+            at_in_match = re.search(r'\b(?:at|in)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)(?:\s*\.|$)', text)
+            if at_in_match:
+                location = at_in_match.group(1).strip()
+                # Only extract if it looks like a real location (not "my appointment", "the place", etc.)
+                if location and len(location) < 30 and not re.search(r'\b(my|appointment|tomorrow|today|for|the|place|location)\b', location.lower()):
+                    entities["location"] = location
+        
+        # Also try spaCy NER for location if not found yet
+        if not entities.get("location"):
+            for ent in doc.ents:
+                if ent.label_ in ["GPE", "LOC", "FAC"]:  # GPE=Geopolitical, LOC=Location, FAC=Facility
+                    entities["location"] = ent.text
+                    break
+        
         # Extract dates and times
+        # BUT: If we found an appointment_id, don't extract "6" or similar as a date (it's an ID)
         for ent in doc.ents:
             if ent.label_ == "DATE":
+                # Don't extract date if it's just a number and we already have appointment_id
+                # This prevents "6" from being extracted as date when it's an appointment ID
+                if entities.get("appointment_id") and ent.text.strip().isdigit():
+                    continue
                 entities["date"] = ent.text
             elif ent.label_ == "TIME":
                 entities["time"] = ent.text
+        
+        # If spaCy only extracted a year (like "2026" from "March 15, 2026"), try regex to get full date
+        if entities.get("date") and len(entities["date"].strip()) <= 4 and entities["date"].isdigit():
+            # Try to extract full date patterns: "March 15, 2026", "15 March 2026", "March 1st, 2026", etc.
+            date_patterns = [
+                r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{4})\b',
+                r'\b(\d{1,2})(?:st|nd|rd|th)?\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b',
+                r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?\s+(\d{4})\b',
+            ]
+            for pattern in date_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    # Reconstruct the full date string from the match
+                    full_date = match.group(0)
+                    entities["date"] = full_date
+                    break
         
         # Extract start_time and end_time separately if both are mentioned
         # Improved patterns to handle various formats: "12 p.m", "12pm", "12 PM", "15", "12, 0, 0"
@@ -327,7 +405,6 @@ class NLU:
             end = re.sub(r'\s*\.\s*', '.', end).replace(' ', '').replace('.', '')
             entities["start_time"] = start
             entities["end_time"] = end
-            print(f"[NLU] Extracted start_time and end_time from 'X till/to Y' pattern: {entities['start_time']} to {entities['end_time']}")
         
         # Also try "from X to Y" pattern
         from_to_match = re.search(r'from\s+(\d{1,2}(?::\d{2})?\s*(?:p\s*\.?\s*m\s*\.?|a\s*\.?\s*m\s*\.?|pm|am|PM|AM)?)\s+to\s+(\d{1,2}(?::\d{2})?\s*(?:p\s*\.?\s*m\s*\.?|a\s*\.?\s*m\s*\.?|pm|am|PM|AM)?)', text_lower)
@@ -339,7 +416,6 @@ class NLU:
             end = re.sub(r'\s*\.\s*', '.', end).replace(' ', '').replace('.', '')
             entities["start_time"] = start
             entities["end_time"] = end
-            print(f"[NLU] Extracted start_time and end_time from 'from X to Y' pattern: {entities['start_time']} to {entities['end_time']}")
         
         # Try to extract start_time (only if explicitly mentioned with time keywords and not already extracted)
         if not entities.get("start_time"):
@@ -349,12 +425,10 @@ class NLU:
                     time_str = match.group(1).strip().lower()
                     # Skip if it's an ordinal word (like "first", "second") - these are dates, not times
                     if time_str in ordinal_words:
-                        print(f"[NLU] Skipping '{time_str}' as start_time - it's an ordinal word (likely a date)")
                         continue
                     # Clean up: "p.m." or "p. m." -> "pm"
                     time_str = time_str.replace('.', '').replace(' ', '')
                     entities["start_time"] = time_str
-                    print(f"[NLU] Extracted start_time: '{match.group(1)}' -> '{entities['start_time']}'")
                     break
         
         # Try to extract end_time (only if explicitly mentioned with time keywords and not already extracted)
@@ -365,12 +439,10 @@ class NLU:
                     time_str = match.group(1).strip().lower()
                     # Skip if it's an ordinal word (like "first", "second") - these are dates, not times
                     if time_str in ordinal_words:
-                        print(f"[NLU] Skipping '{time_str}' as end_time - it's an ordinal word (likely a date)")
                         continue
                     # Clean up: "p.m." or "p. m." -> "pm"
                     time_str = time_str.replace('.', '').replace(' ', '')
                     entities["end_time"] = time_str
-                    print(f"[NLU] Extracted end_time: '{match.group(1)}' -> '{entities['end_time']}'")
                     break
         
         # If no date found via NER, try regex patterns for common date formats
@@ -393,7 +465,6 @@ class NLU:
                 match = re.search(pattern, text_lower)
                 if match:
                     entities["date"] = match.group(1)
-                    print(f"[NLU] Extracted date via regex pattern: {entities['date']}")
                     break
             
             # If still no date found, check for standalone ordinal words in calendar context
@@ -415,48 +486,112 @@ class NLU:
                     }
                     if ordinal_word in ordinal_map:
                         entities["date"] = ordinal_map[ordinal_word]
-                        print(f"[NLU] Extracted standalone ordinal '{ordinal_word}' as date: {entities['date']}")
         
         # Extract description/title (everything after certain keywords)
         # Improved pattern to handle filler words like "is", "would be", "be"
-        title_match = re.search(r'(?:title|call it|named|description)\s+(?:is\s+|would be\s+|be\s+)?([A-Za-z0-9_-]+)', text_lower)
-        if title_match:
-            desc = title_match.group(1).strip()
-            if desc:
+        # Capture multiple words until we hit time/date keywords or end of sentence
+        # Priority: "to the new description which is X" > "new description is X" > "description is X" > "description X"
+        
+        # Pattern 0: "to the new description which is X" or "to the new title which is X" (for update context)
+        to_new_desc_match = re.search(r'to\s+the\s+new\s+(?:description|title)\s+which\s+is\s+([^\.]+?)(?:\s*\.|$)', text_lower)
+        if to_new_desc_match:
+            desc = to_new_desc_match.group(1).strip()
+            # Clean up common filler words at the end
+            desc = re.sub(r'\s+(?:and|the|a|an|is|are|was|were)\s*$', '', desc).strip()
+            if desc and not re.search(r'\bid\s*\d+', desc.lower()):  # Don't extract if it contains ID pattern
                 entities["description"] = desc
-                print(f"[NLU] Extracted description from improved pattern: {desc}")
-        # Pattern 1.5: "title XYZ" or "with title XYZ" (without filler words)
-        elif re.search(r'(?:with\s+)?title\s+([A-Za-z0-9]+)(?:\s+for|\s+on|\s+at|$)', text_lower):
+        
+        # Pattern 0.5: "change [field] of [appointment] to X" - extract X as the new value
+        # This handles "change description of my next appointment to Meeting with Professor X"
+        if not entities.get("description"):
+            change_to_match = re.search(r'change\s+(?:the\s+)?(?:description|title)\s+of\s+[^\.]+?\s+to\s+([^\.]+?)(?:\s*\.|$)', text_lower)
+            if change_to_match:
+                desc = change_to_match.group(1).strip()
+                desc = re.sub(r'\s+(?:and|the|a|an|is|are|was|were)\s*$', '', desc).strip()
+                if desc and not re.search(r'\b(?:my|the|next|upcoming|last|previous|tomorrow\'?s?|today\'?s?)\s+(?:appointment|meeting|event)', desc.lower()):
+                    entities["description"] = desc
+                desc = change_to_match.group(1).strip()
+                # Clean up common filler words
+                desc = re.sub(r'\s+(?:and|the|a|an|is|are|was|were)\s*$', '', desc).strip()
+                # Don't extract if it's an appointment identifier
+                if desc and not re.search(r'\b(?:my|the|next|upcoming|last|previous|tomorrow\'?s?|today\'?s?)\s+(?:appointment|meeting|event)', desc.lower()):
+                    entities["description"] = desc
+        
+        # Pattern 1: "new description is X" or "the new description is X"
+        if not entities.get("description"):
+            new_desc_match = re.search(r'(?:the\s+)?new\s+description\s+is\s+([^\.]+?)(?:\s*\.|$)', text_lower)
+            if new_desc_match:
+                desc = new_desc_match.group(1).strip()
+                # Clean up common filler words at the end
+                desc = re.sub(r'\s+(?:and|the|a|an|is|are|was|were)\s*$', '', desc).strip()
+                if desc and not re.search(r'\bid\s*\d+', desc.lower()):  # Don't extract if it contains ID pattern
+                    entities["description"] = desc
+        
+        # Pattern 2: Regular "description is X" or "description X" (only if not already found)
+        # BUT: Skip if this is in update context with "change the description of X" - we don't want to extract X as description
+        if not entities.get("description"):
+            # Check if this looks like "change the description of X" where X is NOT the new description
+            change_desc_pattern = r'change\s+(?:the\s+)?(?:description|title)\s+of\s+'
+            if re.search(change_desc_pattern, text_lower):
+                pass
+            else:
+                title_match = re.search(r'(?:title|call it|named|description)\s+(?:is\s+|would be\s+|be\s+)?(?:of\s+)?([^\.]+?)(?:\s+(?:and|ending|end|start|starting|time|from|to|on|at|for|when|that|has|id)\s+|\s*\.|$)', text_lower)
+                if title_match:
+                    desc = title_match.group(1).strip()
+                    # Clean up common filler words at the start (like "of", "that has", etc.) and end
+                    desc = re.sub(r'^(?:of|the|a|an|that\s+has?|has?)\s+', '', desc).strip()
+                    desc = re.sub(r'\s+(?:and|the|a|an|is|are|was|were|that|has|id)\s*$', '', desc).strip()
+                    # Don't extract if it contains appointment date references like "tomorrow's appointment", "my appointment"
+                    if desc and not re.search(r'\b(?:tomorrow\'?s?|today\'?s?|my|the)\s+(?:appointment|meeting|event)', desc.lower()):
+                        # Don't extract if it looks like an ID pattern (e.g., "id6", "id 6", "employment id 6")
+                        if not re.search(r'\b(?:id|employment|appointment)\s*\d+', desc.lower()) and not desc.lower().strip().endswith('id'):
+                            entities["description"] = desc
+        
+        # Pattern 1.5: "title XYZ" or "with title XYZ" (without filler words) - only if no description yet
+        if not entities.get("description") and re.search(r'(?:with\s+)?title\s+([A-Za-z0-9]+)(?:\s+for|\s+on|\s+at|$)', text_lower):
             title_match = re.search(r'(?:with\s+)?title\s+([A-Za-z0-9]+)(?:\s+for|\s+on|\s+at|$)', text_lower)
             if title_match:
                 desc = title_match.group(1).strip()
                 if desc:
                     entities["description"] = desc
-                    print(f"[NLU] Extracted description from 'title' pattern: {desc}")
-        else:
-            # Pattern 2: "for XYZ" or "about XYZ" before date
-            desc_patterns = [
-                r"(?:for|about|regarding)\s+([A-Za-z0-9]+)(?:\s+(?:for|on|at)\s+)",
-                r"(?:appointment|meeting|event)\s+(?:for|about|with)\s+([A-Za-z0-9]+)(?:\s+(?:for|on|at)\s+)",
-            ]
-            for pattern in desc_patterns:
-                match = re.search(pattern, text_lower)
-                if match:
-                    desc = match.group(1).strip()
-                    # Don't accept dates as descriptions
-                    if desc and desc.lower() not in ['appointment', 'meeting', 'event'] and not re.search(r'\d+', desc):
-                        entities["description"] = desc
-                        break
+        
+        # Pattern 2: "for XYZ" or "about XYZ" before date - capture multiple words
+        # Only run if we haven't found a description yet
+        # BUT: Skip if this is in update context with "change [field] for/of my [next/tomorrow] appointment" - we don't want to extract appointment identifier as description
+        if not entities.get("description"):
+            # Check if this looks like "change [field] for/of my [next/tomorrow] appointment" where the "for/of" part is identifying the appointment
+            change_field_pattern = r'change\s+(?:the\s+)?(?:date|time|place|location|venue|title|description)\s+(?:for|of)\s+'
+            if re.search(change_field_pattern, text_lower):
+                pass
+            else:
+                desc_patterns = [
+                    r"(?:for|about|regarding)\s+([^\.]+?)(?:\s+(?:for|on|at|and|ending|end|start|starting|time|from|to|when)\s+|\s*\.|$)",
+                    r"(?:appointment|meeting|event)\s+(?:for|about|with)\s+([^\.]+?)(?:\s+(?:for|on|at|and|ending|end|start|starting|time|from|to|when)\s+|\s*\.|$)",
+                ]
+                for pattern in desc_patterns:
+                    match = re.search(pattern, text_lower)
+                    if match:
+                        desc = match.group(1).strip()
+                        # Clean up common filler words at the end
+                        desc = re.sub(r'\s+(?:and|the|a|an|is|are|was|were)\s*$', '', desc).strip()
+                        # Don't accept appointment identifiers like "my next appointment", "my appointment tomorrow", "the appointment"
+                        if desc and desc.lower() not in ['appointment', 'meeting', 'event'] and not re.search(r'\d{4}', desc) and not re.search(r'\b(?:id|number)\s*\d+', desc.lower()):
+                            # Don't extract if it contains appointment references like "my next appointment", "my appointment tomorrow"
+                            if not re.search(r'\b(?:my|the|next|upcoming|last|previous|tomorrow\'?s?|today\'?s?)\s+(?:appointment|meeting|event)', desc.lower()):
+                                entities["description"] = desc
+                                break
         
         # If no description found, try to extract text before date keywords
         if "description" not in entities:
-            # Look for text between action words and date - extract single word before "for/on/at"
-            before_date = re.search(r'(?:add|create|schedule|book|make)\s+(?:an?\s+)?(?:appointment|meeting|event)?\s*(?:with\s+title\s+)?([A-Za-z0-9]+)\s+(?:for|on|at)\s+', text_lower)
+            # Look for text between action words and date - extract multiple words before "for/on/at"
+            before_date = re.search(r'(?:add|create|schedule|book|make)\s+(?:an?\s+)?(?:appointment|meeting|event)?\s*(?:with\s+title\s+)?([^\.]+?)\s+(?:for|on|at|and|ending|end|start|starting|time)\s+', text_lower)
             if before_date:
                 desc = before_date.group(1).strip()
                 # Clean up common words and don't accept dates
-                desc = re.sub(r'\b(appointment|meeting|event|with|title)\b', '', desc).strip()
-                if desc and len(desc) > 0 and not re.search(r'\d+', desc):
+                desc = re.sub(r'\b(appointment|meeting|event|with|title|the|a|an|is|are|was|were)\b', '', desc).strip()
+                # Remove leading/trailing punctuation
+                desc = re.sub(r'^[.,!?\s]+|[.,!?\s]+$', '', desc).strip()
+                if desc and len(desc) > 0 and not re.search(r'\d{4}', desc):
                     entities["description"] = desc
         
         # If still no description and this might be a short follow-up response (like "X, Y, Z")
@@ -490,15 +625,12 @@ class NLU:
                                 # For now, if end_time is missing, use as end_time, else start_time
                                 if not entities.get("end_time") and entities.get("start_time"):
                                     entities["end_time"] = time_str
-                                    print(f"[NLU] Extracted end_time from numeric input: '{clean_text}' -> '{time_str}'")
                                 elif not entities.get("start_time"):
                                     entities["start_time"] = time_str
-                                    print(f"[NLU] Extracted start_time from numeric input: '{clean_text}' -> '{time_str}'")
                     elif not re.search(r'\d{2,}', clean_text):
                         # Don't accept if it's just common words
                         if clean_text.lower() not in ['yes', 'no', 'ok', 'okay', 'sure', 'thanks', 'thank you']:
                             entities["description"] = clean_text
-                            print(f"[NLU] Extracted description from short response: '{clean_text}'")
         
         return entities
     
@@ -528,6 +660,22 @@ class NLU:
         dates = [ent.text for ent in doc.ents if ent.label_ == "DATE"]
         if dates:
             entities["date"] = dates[0]
+        
+        # Also try regex patterns for date extraction (same as in _extract_calendar_entities)
+        # This helps catch dates like "12th January" that spaCy might miss
+        if not entities.get("date"):
+            # Try regex patterns for common date formats
+            date_patterns = [
+                # Ordinal dates: "1st January", "22nd March", "3rd December" (with optional year)
+                r'\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+\d{4})?)\b',
+                # Month first: "January 1st", "March 22nd" (with optional year)
+                r'\b((?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{4})?)\b',
+            ]
+            for pattern in date_patterns:
+                match = re.search(pattern, text_lower)
+                if match:
+                    entities["date"] = match.group(1)
+                    break
         
         # Check for "all" or "today" or "tomorrow" or "next" or "upcoming"
         if "all" in text_lower:
