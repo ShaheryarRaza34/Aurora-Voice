@@ -1,0 +1,17 @@
+.git
+.github
+
+.env
+.env.*
+
+slides
+frontend
+nls_submission
+
+*.pdf
+*.ipynb
+*.zip
+*.tar
+
+check_db*.py
+extract_pdf.py
